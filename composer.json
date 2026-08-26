@@ -24,8 +24,8 @@
     },
     "repositories": [
         {
-            "type": "path",
-            "url": "../jsonschema"
+            "type": "vcs",
+            "url":  "https://github.com/bwaidelich/neos-jsonschema"
         }
     ],
     "autoload": {
