@@ -1,0 +1,52 @@
+{
+    "name": "neos/schematic",
+    "description": "Engine for coercion-capable schemas: describe PHP value objects (with attributes, or your own generation middleware), safely coerce unknown input into instances, and render to JSON Schema.",
+    "type": "library",
+    "support": {
+        "source": "https://github.com/neos/schematic.git",
+        "forum": "https://discuss.neos.io/",
+        "docs": "https://docs.neos.io/"
+    },
+    "require": {
+        "php": ">=8.4",
+        "neos/jsonschema": "dev-main",
+        "psr/simple-cache": "^2 || ^3"
+    },
+    "suggest": {
+        "psr/container": "To resolve Factories that have dependencies via a PSR-11 container (ContainerFactoryResolver)"
+    },
+    "require-dev": {
+        "roave/security-advisories": "dev-latest",
+        "phpstan/phpstan": "^2",
+        "friendsofphp/php-cs-fixer": "^3",
+        "phpunit/phpunit": "^10 || ^11 || ^12",
+        "psr/container": "^1 || ^2"
+    },
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../jsonschema"
+        }
+    ],
+    "autoload": {
+        "psr-4": {
+            "Neos\\Schematic\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Neos\\Schematic\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test:phpstan": "phpstan",
+        "test:cs": "php-cs-fixer check",
+        "test:cs:fix": "php-cs-fixer fix",
+        "test:phpunit": "phpunit",
+        "test": [
+            "@test:phpstan",
+            "@test:cs",
+            "@test:phpunit"
+        ]
+    }
+}
