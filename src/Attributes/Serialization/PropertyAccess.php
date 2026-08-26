@@ -9,7 +9,7 @@ use Neos\Schematic\Serialization\UnextractableValue;
 /**
  * Reads a declared property off an instance, bypassing visibility — the mirror of
  * {@see \Neos\Schematic\Attributes\Instantiation\Construction}, which bypasses constructor visibility so value
- * objects can keep private constructors. See ADR 0009.
+ * objects can keep private constructors.
  *
  * @internal
  */

@@ -10,10 +10,10 @@ use Attribute;
  * Marks an interface (or abstract class) as a polymorphic type, naming the property that says which implementation
  * a payload denotes and enumerating the accepted values.
  *
- * The `mapping` is **required**, deliberately: the equivalent attribute in `wwwision/types` allows it to be
- * omitted, and then treats the discriminator value from the input as a class name to instantiate. That is
- * attacker-controlled class instantiation, and we do not reproduce it — every accepted value is enumerated here,
- * so no class-string ever reaches construction from input. See ADR 0010.
+ * The `mapping` is **required**, deliberately: an absent mapping would otherwise invite treating the discriminator
+ * value from the input as a class name to instantiate. That is attacker-controlled class instantiation, and we do
+ * not reproduce it — every accepted value is enumerated here, so no class-string ever reaches construction from
+ * input.
  *
  * Without this attribute an interface or abstract class is not described at all: the middleware passes it on, and
  * an unhandled one ends in an `UnsupportedTypeException`. Enumerating the implementations is the point — nothing

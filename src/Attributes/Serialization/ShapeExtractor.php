@@ -19,8 +19,7 @@ use Neos\Schematic\Serialization\ValueExtractor;
  * constructor parameter of the same name.
  *
  * Every property the schema declares is emitted, including those whose value equals the constructor default. The
- * schema advertises them, so omitting them would make the emitted document narrower than the published contract —
- * a deliberate divergence from `wwwision/types`' Normalizer, which skips defaults.
+ * schema advertises them, so omitting them would make the emitted document narrower than the published contract.
  */
 final class ShapeExtractor implements ValueExtractor
 {

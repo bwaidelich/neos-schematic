@@ -101,8 +101,8 @@ final class SerializationTest extends TestCase
     }
 
     /**
-     * Deliberate divergence from `wwwision/types`' Normalizer, which omits properties equal to their default: the
-     * schema advertises every property, so the emitted document must not be narrower than the published contract.
+     * The schema advertises every property, so the emitted document must not be narrower than the published
+     * contract, even for properties equal to their default.
      */
     public function testPropertiesEqualToTheirDefaultAreStillEmitted(): void
     {

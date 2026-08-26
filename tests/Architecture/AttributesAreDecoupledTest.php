@@ -10,8 +10,6 @@ use PHPUnit\Framework\TestCase;
  * Guards the one rule that keeps the attribute support optional now that it ships in the same package as the
  * engine: the dependency only ever points *inwards*. `Neos\Schematic\Attributes` may use the engine; nothing in
  * the engine (nor in the engine's own tests, which prove it works standalone) may name the attribute namespace.
- *
- * See ADR 0008.
  */
 final class AttributesAreDecoupledTest extends TestCase
 {

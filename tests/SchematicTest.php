@@ -15,7 +15,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * Covers the entry point with a hand-written middleware only — no attributes involved, mirroring the "engine
- * usable on its own" promise of ADR 0008.
+ * usable on its own" promise.
  */
 final class SchematicTest extends TestCase
 {

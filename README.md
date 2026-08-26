@@ -66,8 +66,7 @@ assert($contact->age->value === 45);
 ```
 
 Note that the constructors are **private**: instances of `ContactName` can only come into existence through a
-validated path, and `new ContactName('')` is not one of them. Schematic constructs them anyway (see
-[ADR 0009](docs/adr/0009-reflection-in-attribute-factories.md)).
+validated path, and `new ContactName('')` is not one of them. Schematic constructs them anyway.
 
 ## The two phases
 
@@ -198,8 +197,7 @@ assert($schematic->schemaFor(Contact::class)->toJsonSchema()->validate($primitiv
 That guarantee is why serialization is schema-driven rather than a generic reflecting normalizer: `json_encode()`
 on a value object emits whatever the class happens to expose, with nothing tying it to the schema. Mechanically,
 each `Schema` node names a `ValueExtractor` by class-string exactly as it names an `InstanceFactory` — the
-`ReflectionMiddleware` stamps both, so anything it can map, it can read back (see
-[ADR 0011](docs/adr/0011-value-serialization-mirrors-instantiation.md)).
+`ReflectionMiddleware` stamps both, so anything it can map, it can read back.
 
 Every property the schema declares is emitted, including those equal to their constructor default: the schema
 advertises them, so omitting them would make the document narrower than the contract.
@@ -415,9 +413,8 @@ assert($unknown->issues->toArray()[0]->pathAsString() === 'type');
 assert($unknown->issues->toArray()[0]->message === 'Discriminator "type" must be one of "circle", "square"');
 ```
 
-The mapping being required is deliberate — see
-[ADR 0010](docs/adr/0010-discriminator-mapping-is-required.md). Generation also fails loudly if a mapped class
-does not implement the interface, or if it already declares a property with the discriminator's name.
+The mapping being required is deliberate. Generation also fails loudly if a mapped class does not implement the
+interface, or if it already declares a property with the discriminator's name.
 
 ### Nullable properties
 
@@ -806,20 +803,6 @@ your own seams honest:
   cannot resolve them: the `Coercer` throws rather than guess.
 
 ## Architecture
-
-The design decisions and their trade-offs are recorded as ADRs in [docs/adr](docs/adr):
-
-| ADR | Decision |
-| --- | --- |
-| [0001](docs/adr/0001-rich-coercion-schema.md) | a rich, coercion-capable schema |
-| [0002](docs/adr/0002-two-phase-coerce-instantiate.md) | two phases: coerce, then instantiate |
-| [0003](docs/adr/0003-no-builtin-generator.md) | no built-in generator; all schema production is middleware |
-| [0004](docs/adr/0004-coercion-atop-pure-jsonschema.md) | coercion sits atop pure JSON Schema value objects |
-| [0005](docs/adr/0005-validation-moves-to-jsonschema.md) | validation lives in `neos/jsonschema` |
-| [0006](docs/adr/0006-providesschema-bridge.md) | the `ProvidesSchema` bridge |
-| [0007](docs/adr/0007-single-schema-class.md) | one `Schema` class keyed by `Kind` |
-| [0008](docs/adr/0008-attributes-ship-in-this-package.md) | attributes ship here, isolated by namespace |
-| [0009](docs/adr/0009-reflection-in-attribute-factories.md) | attribute factories construct via reflection |
 
 Every PHP example in this README is executed by `tests/Documentation/ReadmeCodeBlockTest.php`, so the
 documentation cannot drift from the code.
