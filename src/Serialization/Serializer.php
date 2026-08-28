@@ -45,39 +45,8 @@ final class Serializer
         return match ($schema->kind) {
             Kind::Object => $this->serializeObjectStructurally($schema, $value),
             Kind::List => $this->serializeArrayStructurally($schema, $value),
-            Kind::Union => $this->serializeUnion($schema, $value),
             Kind::Scalar => $value,
         };
-    }
-
-    /**
-     * The mirror of the Instantiator's union handling. Going *out*, the candidate is selected by the instance's
-     * class rather than by a discriminator value — so the discriminator key has to be put back, which is what
-     * makes the emitted payload re-readable.
-     */
-    private function serializeUnion(Schema $schema, mixed $value): mixed
-    {
-        if (!is_object($value)) {
-            return $value;
-        }
-        $propertyName = $schema->discriminatorPropertyName();
-        foreach ($schema->candidates as $discriminatorValue => $candidate) {
-            if ($candidate->target === null || !$value instanceof $candidate->target) {
-                continue;
-            }
-            $serialized = $this->serialize($candidate, $value);
-            if (!is_array($serialized) || array_key_exists($propertyName, $serialized)) {
-                // the candidate already emitted the tag (its schema pins it as a `const`)
-                return $serialized;
-            }
-            return [$propertyName => $discriminatorValue, ...$serialized];
-        }
-        throw new UnextractableValue(sprintf(
-            '"%s" is not one of the candidates of the "%s" union ("%s")',
-            $value::class,
-            $propertyName,
-            implode('", "', array_keys($schema->candidates)),
-        ), 1751885503);
     }
 
     private function serializeObjectStructurally(Schema $schema, mixed $value): mixed

@@ -9,10 +9,8 @@ use Neos\JsonSchema\BooleanSchema as JsonBooleanSchema;
 use Neos\JsonSchema\IntegerSchema as JsonIntegerSchema;
 use Neos\JsonSchema\NumberSchema as JsonNumberSchema;
 use Neos\JsonSchema\ObjectSchema as JsonObjectSchema;
-use Neos\JsonSchema\OneOfSchema as JsonOneOfSchema;
 use Neos\JsonSchema\Schema as JsonSchema;
 use Neos\JsonSchema\StringSchema as JsonStringSchema;
-use Neos\JsonSchema\Support\Discriminator as JsonDiscriminator;
 use Neos\Schematic\Attributes\Instantiation\EnumFactory;
 use Neos\Schematic\Attributes\Instantiation\ListFactory;
 use Neos\Schematic\Attributes\Instantiation\ShapeFactory;
@@ -24,7 +22,6 @@ use Neos\Schematic\Attributes\Serialization\ShapeExtractor;
 use Neos\Schematic\Generation\SchemaGenerator;
 use Neos\Schematic\Generation\SchemaMiddleware;
 use Neos\Schematic\Generation\UnsupportedTypeException;
-use Neos\Schematic\Schema\Kind;
 use Neos\Schematic\Schema\Schema;
 use ReflectionClass;
 use ReflectionEnum;
@@ -41,25 +38,19 @@ use UnitEnum;
  * counterpart, so every schema it produces round-trips. Nested class types are resolved by re-entering the root
  * pipeline.
  *
- * An interface or abstract class carrying {@see Discriminator} becomes a union of its mapped implementations;
- * without that attribute it is delegated to the next middleware.
+ * An interface or abstract class describes no shape of its own, so it is delegated to the next middleware.
  */
 final class ReflectionMiddleware implements SchemaMiddleware
 {
     public function process(string $className, SchemaGenerator $next, SchemaGenerator $root): Schema
     {
-        // interface_exists() too: class_exists() is false for an interface, which would delegate it before the
-        // discriminator below is ever considered
-        if (!class_exists($className) && !interface_exists($className)) {
+        if (!class_exists($className)) {
             return $next->generate($className);
         }
         $reflectionClass = new ReflectionClass($className);
-        if ($reflectionClass->isInterface() || $reflectionClass->isAbstract()) {
-            $discriminator = $this->attribute($reflectionClass, Discriminator::class);
-            if ($discriminator === null) {
-                return $next->generate($className);
-            }
-            return $this->union($className, $discriminator, $root);
+        if ($reflectionClass->isAbstract()) {
+            // an abstract class has no instances of its own to describe
+            return $next->generate($className);
         }
         $description = $this->description($reflectionClass);
         // PHP forbids a normal class from implementing UnitEnum, so this is exactly "is an enum" — and unlike
@@ -106,59 +97,6 @@ final class ReflectionMiddleware implements SchemaMiddleware
             );
         }
         return $this->shape($reflectionClass, $className, $description, $root);
-    }
-
-    /**
-     * A polymorphic type: each mapped implementation is generated through the root pipeline, and its schema gains
-     * the discriminator as a **required `const` property**.
-     *
-     * Pinning the tag inside every candidate is what keeps the whole thing plain JSON Schema: the rendered `oneOf`
-     * is then unambiguous on its own — a validator can pick the branch from the payload without the OpenAPI
-     * `discriminator` keyword — and the tag survives coercion, so the Instantiator knows what to build.
-     *
-     * (A `oneOf` carries no `description` of its own, so a `#[Description]` on the interface has nowhere to go —
-     * the descriptions of the candidates are what a reader sees.)
-     *
-     * @param class-string $className
-     */
-    private function union(string $className, Discriminator $discriminator, SchemaGenerator $root): Schema
-    {
-        $candidates = [];
-        foreach ($discriminator->mapping as $value => $implementationClassName) {
-            // checked before generating, so a typo in the mapping fails immediately rather than after building a
-            // schema that could never be selected
-            if (!is_a($implementationClassName, $className, true)) {
-                throw new UnsupportedTypeException(sprintf('Discriminator mapping "%s" of "%s" refers to "%s", which is not an implementation of it', $value, $className, $implementationClassName));
-            }
-            $candidates[$value] = $this->withDiscriminatorProperty($root->generate($implementationClassName), $discriminator->propertyName, $value, $className);
-        }
-        return Schema::union(
-            JsonOneOfSchema::create()->withDiscriminator(new JsonDiscriminator($discriminator->propertyName, $discriminator->mapping)),
-            $candidates,
-            $className,
-        );
-    }
-
-    /**
-     * @param class-string $unionClassName
-     */
-    private function withDiscriminatorProperty(Schema $candidate, string $propertyName, string $value, string $unionClassName): Schema
-    {
-        if ($candidate->kind !== Kind::Object || !$candidate->jsonSchema instanceof JsonObjectSchema) {
-            throw new UnsupportedTypeException(sprintf('Candidate "%s" of the "%s" union must be a shape, so that the "%s" discriminator can live on it', (string) $candidate->target, $unionClassName, $propertyName));
-        }
-        if (isset($candidate->properties[$propertyName])) {
-            // Otherwise the tag and a real property of the same name would fight over one key.
-            throw new UnsupportedTypeException(sprintf('Candidate "%s" of the "%s" union already declares a property "%s", which the discriminator needs', (string) $candidate->target, $unionClassName, $propertyName));
-        }
-        $required = $candidate->jsonSchema->required ?? [];
-        return Schema::object(
-            $candidate->jsonSchema->with(required: [$propertyName, ...$required]),
-            [$propertyName => Schema::scalar(JsonStringSchema::create(const: $value)), ...$candidate->properties],
-            $candidate->target,
-            $candidate->factory,
-            $candidate->extractor,
-        );
     }
 
     /**

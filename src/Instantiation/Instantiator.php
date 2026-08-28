@@ -41,24 +41,8 @@ final class Instantiator
         return match ($schema->kind) {
             Kind::Object => $this->instantiateObjectStructurally($schema, $value),
             Kind::List => $this->instantiateArrayStructurally($schema, $value),
-            Kind::Union => $this->instantiateUnion($schema, $value),
             Kind::Scalar => $value,
         };
-    }
-
-    /**
-     * A union node builds nothing itself: the discriminator picks the candidate, and that candidate's own
-     * InstanceFactory does the work. The discriminator key is dropped first — it identifies the type rather than
-     * being a property of it, and each candidate sets `additionalProperties: false`.
-     */
-    private function instantiateUnion(Schema $schema, mixed $value): mixed
-    {
-        $candidate = $schema->resolveCandidate($value);
-        if ($candidate === null || !is_array($value)) {
-            throw new InvalidValue(sprintf('Cannot resolve the "%s" discriminator to a candidate', $schema->discriminatorPropertyName()), []);
-        }
-        unset($value[$schema->discriminatorPropertyName()]);
-        return $this->instantiate($candidate, $value);
     }
 
     private function instantiateObjectStructurally(Schema $schema, mixed $value): mixed

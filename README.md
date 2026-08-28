@@ -254,7 +254,6 @@ The attribute classes and the middleware that reads them live in `Neos\Schematic
 | `#[IntegerBased(minimum, maximum)]` | class | an integer wrapped in a class |
 | `#[FloatBased(minimum, maximum)]` | class | a float wrapped in a class |
 | `#[ListBased(itemClassName, minCount, maxCount)]` | class | a typed collection |
-| `#[Discriminator(propertyName, mapping)]` | interface / abstract class | a polymorphic type, `oneOf` its mapped implementations |
 | `#[Description(value)]` | class | the JSON Schema `description` |
 | `#[Ignore]` | constructor parameter | excluded from the schema (the parameter must have a default) |
 
@@ -352,69 +351,6 @@ assert($json === '{"type":"string","description":"Whether an account is still re
 
 An enum declaring no cases is rejected with an `UnsupportedTypeException` — it describes a type no value can
 inhabit.
-
-### Polymorphic types
-
-An interface (or abstract class) carrying `#[Discriminator]` becomes a `oneOf` of its implementations. The
-`mapping` enumerates which tag value denotes which class, and it is **required**:
-
-```php
-use Neos\JsonSchema\Validation\IssueCode;
-use Neos\Schematic\Attributes\Discriminator;
-use Neos\Schematic\Attributes\ReflectionMiddleware;
-use Neos\Schematic\Schematic;
-
-#[Discriminator(propertyName: 'type', mapping: ['circle' => Circle::class, 'square' => Square::class])]
-interface Shape {}
-
-final readonly class Circle implements Shape
-{
-    private function __construct(public int $radius) {}
-}
-
-final readonly class Square implements Shape
-{
-    private function __construct(public int $side) {}
-}
-
-$schematic = Schematic::create(new ReflectionMiddleware());
-
-$circle = $schematic->map(Shape::class, ['type' => 'circle', 'radius' => 5])->value();
-assert($circle instanceof Circle);
-assert($circle->radius === 5);
-
-// and back out again, with the tag restored
-assert($schematic->serialize(Shape::class, $circle) === ['type' => 'circle', 'radius' => 5]);
-```
-
-The tag is not a property of any implementation — none of them declares `$type`. Instead each candidate's schema
-pins it as a required `const`, which is what makes the rendered `oneOf` resolvable by a plain JSON Schema
-validator, and what lets the tag survive a round trip:
-
-```php
-// ...
-$json = json_encode($schematic->schemaFor(Shape::class)->toJsonSchema());
-assert(str_contains((string) $json, '"type":{"type":"string","const":"circle"}'));
-assert(str_contains((string) $json, '"required":["type","radius"]'));
-```
-
-Because the tag selects exactly one branch, a violation *inside* that branch is reported as itself rather than as
-a blanket "matched none of them":
-
-```php
-// ...
-$bad = $schematic->map(Shape::class, ['type' => 'circle', 'radius' => 'not-a-number']);
-assert($bad->success === false);
-assert($bad->issues->toArray()[0]->pathAsString() === 'radius');
-assert($bad->issues->toArray()[0]->code === IssueCode::InvalidType->value);
-
-$unknown = $schematic->map(Shape::class, ['type' => 'triangle']);
-assert($unknown->issues->toArray()[0]->pathAsString() === 'type');
-assert($unknown->issues->toArray()[0]->message === 'Discriminator "type" must be one of "circle", "square"');
-```
-
-The mapping being required is deliberate. Generation also fails loudly if a mapped class does not implement the
-interface, or if it already declares a property with the discriminator's name.
 
 ### Nullable properties
 
@@ -697,9 +633,10 @@ Because nested types re-enter the pipeline, each named type is cached independen
 
 ## Factories with dependencies
 
-By default an `InstanceFactory` is created with `new`, so it must have no required constructor arguments. If a
-factory needs collaborators, resolve it from a PSR-11 container instead — `ContainerFactoryResolver` falls back to
-`new` for anything the container doesn't know:
+Factories and Extractors are resolved by a `FactoryResolver` / `ExtractorResolver`. The default one builds every
+entry with `new`, so a factory must have no required constructor arguments. If a factory needs collaborators, hand
+the application's PSR-11 container to `ContainerFactoryResolver` — anything the container doesn't know is still
+built with `new`:
 
 ```php
 use Neos\JsonSchema\StringSchema;
@@ -788,8 +725,9 @@ your own seams honest:
 
 ## Known limitations
 
-- An **interface or abstract class** is only described when it carries `#[Discriminator]` (see below); without it
-  the middleware passes it on, so an unhandled one ends in an `UnsupportedTypeException`.
+- An **interface or abstract class** describes no shape of its own, so the middleware passes it on and an
+  unhandled one ends in an `UnsupportedTypeException`. Polymorphism is not supported: a payload whose type is
+  decided by one of its own keys has no schema this package can generate.
 - Constructor parameters must be **single named types**. Genuine union and intersection types are rejected —
   but a **nullable** type (`Foo|null`, equivalently `?Foo`) is supported, see below. `mixed` and a bare `null`
   are not: they report as nullable to reflection but describe no shape, so they are still rejected.

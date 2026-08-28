@@ -42,7 +42,6 @@ final class Coercer
             Kind::Scalar => $this->normalizeScalar($schema->jsonSchema, $input),
             Kind::Object => $this->normalizeObject($schema, $input),
             Kind::List => $this->normalizeArray($schema, $input),
-            Kind::Union => $this->normalizeUnion($schema, $input),
         };
     }
 
@@ -74,29 +73,6 @@ final class Coercer
         return $normalized;
     }
 
-    /**
-     * A discriminated union is determinate: the discriminator names exactly one candidate, so descend into that
-     * one rather than trying every branch. An unresolvable discriminator is passed through untouched, so the
-     * Validator reports it precisely instead of this method guessing.
-     *
-     * The discriminator key stays in the value throughout — each candidate declares it as a `const` property, so
-     * it validates, survives projection, and later tells the Instantiator which candidate to build.
-     */
-    private function normalizeUnion(Schema $schema, mixed $input): mixed
-    {
-        if (is_object($input)) {
-            $input = get_object_vars($input);
-        }
-        $candidate = $schema->resolveCandidate($input);
-        return $candidate === null ? $input : $this->normalize($candidate, $input);
-    }
-
-    private function projectUnion(Schema $schema, mixed $normalized): mixed
-    {
-        $candidate = $schema->resolveCandidate($normalized);
-        return $candidate === null ? $normalized : $this->project($candidate, $normalized);
-    }
-
     private function normalizeArray(Schema $schema, mixed $input): mixed
     {
         if (!is_array($input) || ($input !== [] && !array_is_list($input))) {
@@ -115,7 +91,6 @@ final class Coercer
         return match ($schema->kind) {
             Kind::Object => $this->projectObject($schema, $normalized),
             Kind::List => $this->projectArray($schema, $normalized),
-            Kind::Union => $this->projectUnion($schema, $normalized),
             Kind::Scalar => $normalized,
         };
     }
