@@ -2,6 +2,7 @@
     "name": "neos/schematic",
     "description": "The bridge between PHP classes and JSON Schema: a type owns its schema by returning it from a static schema(), and Schematic validates input against it, builds the instance, and reads it back out.",
     "type": "library",
+    "license": "MIT",
     "support": {
         "source": "https://github.com/neos/schematic.git",
         "forum": "https://discuss.neos.io/",

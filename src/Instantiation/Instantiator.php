@@ -45,8 +45,11 @@ final class Instantiator
     {
         $shape = ClassShape::of($className);
         if ($shape->nature === Nature::Enum) {
-            /** @var T */
-            return self::enumCase($className, $value);
+            $case = self::enumCase($className, $value);
+            // a case of the enum that was asked for, which is what makes it the T the caller named
+            return $case instanceof $className
+                ? $case
+                : throw new \LogicException(sprintf('"%s" resolved to a case of %s', $className, $case::class), 1783600410);
         }
         $arguments = self::arguments($shape->nature, $shape->parameters, $value, $className);
         // named arguments for a shape, so declaration order stops mattering; positional for the rest
