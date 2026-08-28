@@ -1,0 +1,84 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Neos\Schematic\Reflection;
+
+/**
+ * The one reading of a class the engine needs: its {@see Nature}, and the constructor parameters that make it up.
+ *
+ * Instantiation and serialization need no schema — after coercion the value already *is* schema-conformant
+ * primitives, so all that is left is the class's own shape. This is that shape, read once and passed around.
+ *
+ * The nature is decided from the class alone, in this order, which makes it unambiguous:
+ *
+ * | Class                                       | Nature   |
+ * | ------------------------------------------- | -------- |
+ * | an `enum`                                    | Enum     |
+ * | one variadic parameter                       | ListOf   |
+ * | one parameter typed `string\|int\|float\|bool` | Scalar   |
+ * | anything else                                | Shape    |
+ *
+ * Variadic is checked before scalar, so `Parts{string ...$parts}` is a collection rather than one value; and a
+ * class-typed single parameter stays a Shape, because only a builtin scalar arrives as a bare primitive. A value
+ * object wanting collection semantics without variadics says so by making the parameter variadic.
+ */
+final readonly class ClassShape
+{
+    /**
+     * @param class-string $className
+     * @param list<\ReflectionParameter> $parameters
+     */
+    private function __construct(
+        public string $className,
+        public Nature $nature,
+        public array $parameters,
+    ) {}
+
+    /**
+     * @param class-string $className
+     */
+    public static function of(string $className): self
+    {
+        if (!class_exists($className) && !enum_exists($className) && !interface_exists($className)) {
+            throw new \InvalidArgumentException(sprintf('"%s" is not a class, enum or interface', $className), 1783600201);
+        }
+        $reflectionClass = new \ReflectionClass($className);
+        if ($reflectionClass->isEnum()) {
+            return new self($className, Nature::Enum, []);
+        }
+        if ($reflectionClass->isInterface() || $reflectionClass->isAbstract()) {
+            throw new \InvalidArgumentException(sprintf('"%s" cannot be instantiated, so it has no shape of its own', $className), 1783600202);
+        }
+        $parameters = $reflectionClass->getConstructor()?->getParameters() ?? [];
+        return new self($className, self::natureOf($parameters), $parameters);
+    }
+
+    public function parameter(string $name): \ReflectionParameter|null
+    {
+        foreach ($this->parameters as $parameter) {
+            if ($parameter->getName() === $name) {
+                return $parameter;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * @param list<\ReflectionParameter> $parameters
+     */
+    private static function natureOf(array $parameters): Nature
+    {
+        if (count($parameters) !== 1) {
+            return Nature::Shape;
+        }
+        if ($parameters[0]->isVariadic()) {
+            return Nature::ListOf;
+        }
+        $type = $parameters[0]->getType();
+        if (!$type instanceof \ReflectionNamedType || !$type->isBuiltin()) {
+            return Nature::Shape;
+        }
+        return in_array($type->getName(), ['string', 'int', 'float', 'bool'], true) ? Nature::Scalar : Nature::Shape;
+    }
+}

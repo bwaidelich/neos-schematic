@@ -4,89 +4,124 @@ declare(strict_types=1);
 
 namespace Neos\Schematic\Tests\Serialization;
 
-use Neos\Schematic\Instantiation\Mapper;
+use Neos\Schematic\Schematic;
 use Neos\Schematic\Serialization\Serializer;
-use Neos\Schematic\Serialization\UnextractableValue;
-use Neos\Schematic\Tests\Fixtures\Contact;
-use Neos\Schematic\Tests\Fixtures\ContactName;
-use Neos\Schematic\Tests\Fixtures\Fixtures;
+use Neos\Schematic\Tests\Fixtures\Channel;
+use Neos\Schematic\Tests\Fixtures\Hidden;
+use Neos\Schematic\Tests\Fixtures\OpaqueTags;
+use Neos\Schematic\Tests\Fixtures\Post;
+use Neos\Schematic\Tests\Fixtures\Rating;
+use Neos\Schematic\Tests\Fixtures\Status;
+use Neos\Schematic\Tests\Fixtures\Tag;
+use Neos\Schematic\Tests\Fixtures\TagList;
+use Neos\Schematic\Tests\Fixtures\Tags;
+use Neos\Schematic\UnextractableValue;
+use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
 /**
- * The engine-side Serializer, driven by hand-built Schema graphs (the engine ships no generator).
+ * The way back out: public properties only, driven by the same class shape that built the value.
  */
+#[CoversClass(Serializer::class)]
+#[CoversClass(UnextractableValue::class)]
 final class SerializerTest extends TestCase
 {
-    public function testANodeWithoutAnExtractorPassesScalarsThrough(): void
+    /**
+     * @return array<mixed>
+     */
+    private function payload(): array
     {
-        $schema = Fixtures::contactName();
-        self::assertNull($schema->extractor, 'the engine fixtures stamp no extractor');
-
-        self::assertSame('Alice', (new Serializer())->serialize($schema, 'Alice'));
+        return [
+            'slug' => 'hello-world',
+            'author' => 'Ada',
+            'status' => 'draft',
+            'tags' => ['php', 'json'],
+            'subtitle' => 'a first post',
+        ];
     }
 
-    public function testANodeWithoutAnExtractorRecursesStructurally(): void
+    public function testAScalarValueObjectIsItsValue(): void
     {
-        $result = (new Serializer())->serialize(Fixtures::contact(), ['name' => 'Alice', 'age' => 30]);
-
-        self::assertSame(['name' => 'Alice', 'age' => 30], $result);
+        self::assertSame('php', Schematic::serialize(new Tag('php')));
     }
 
-    public function testANullableNodeSerializesNullWithoutConsultingTheExtractor(): void
+    public function testABackedEnumIsItsBackingValue(): void
     {
-        $schema = Fixtures::contactName()->asNullable();
-
-        self::assertNull((new Serializer())->serialize($schema, null));
+        self::assertSame('draft', Schematic::serialize(Status::draft));
+        self::assertSame(5, Schematic::serialize(Rating::high));
     }
 
-    public function testTheExtractorIsUsedWhenTheNodeNamesOne(): void
+    public function testAPureEnumIsItsCaseName(): void
     {
-        $schema = Fixtures::contactNameWithExtractor();
-
-        $result = (new Serializer())->serialize($schema, new ContactName('Alice'));
-
-        self::assertSame('Alice', $result);
+        self::assertSame('phone', Schematic::serialize(Channel::phone));
     }
 
-    public function testAnUnresolvableExtractorClassIsRejected(): void
+    public function testACollectionIsItsItems(): void
     {
-        $schema = Fixtures::contactNameWithBrokenExtractor();
+        $tags = Schematic::instantiate(Tags::class, ['php', 'json']);
 
-        $this->expectException(\InvalidArgumentException::class);
-        (new Serializer())->serialize($schema, new ContactName('Alice'));
+        self::assertSame(['php', 'json'], Schematic::serialize($tags));
     }
 
     /**
-     * The round-trip property the whole design exists for: map input in, serialize back out, get the input.
+     * A collection answering "what is in me" itself is read through that answer rather than through a property.
      */
-    public function testMappedInputSerializesBackToTheSameStructure(): void
+    public function testATraversableCollectionIsIterated(): void
     {
-        $schema = Fixtures::contactWithExtractors();
-        $input = ['name' => 'Alice', 'age' => 30];
-
-        $result = (new Mapper())->map($schema, $input);
-        self::assertTrue($result->success);
-        self::assertInstanceOf(Contact::class, $result->value());
-
-        self::assertSame($input, (new Serializer())->serialize($schema, $result->value()));
+        self::assertSame(['php'], Schematic::serialize(new TagList(new Tag('php'))));
     }
 
-    public function testAListSerializesBackToItsItems(): void
+    /**
+     * The round trip that matters: what goes out is exactly what came in, so the emitted body still satisfies the
+     * schema the document published.
+     */
+    public function testAShapeRoundTripsThroughItsPrimitives(): void
     {
-        $schema = Fixtures::contactNamesWithExtractors();
-        $input = ['Alice', 'Bob'];
+        $post = Schematic::map(Post::class, $this->payload())->value();
 
-        $result = (new Mapper())->map($schema, $input);
-        self::assertTrue($result->success);
-
-        self::assertSame($input, (new Serializer())->serialize($schema, $result->value()));
+        self::assertSame($this->payload(), Schematic::serialize($post));
     }
 
-    public function testAnExtractorThatCannotReadTheValueThrows(): void
+    public function testTheTraitEmitsTheSameThingAsTheFacade(): void
     {
-        $schema = Fixtures::contactNameWithExtractor();
+        $post = Schematic::map(Post::class, $this->payload())->value();
+        self::assertInstanceOf(Post::class, $post);
+
+        self::assertSame(json_encode(Schematic::serialize($post)), json_encode($post));
+    }
+
+    public function testANullPropertyStaysNull(): void
+    {
+        $payload = ['slug' => 'hello-world', 'author' => 'Ada', 'status' => 'draft', 'tags' => [], 'subtitle' => null];
+        $post = Schematic::map(Post::class, $payload)->value();
+
+        self::assertSame($payload, Schematic::serialize($post));
+    }
+
+    /**
+     * The boundary a class drew going in is honoured going out: private state is not reflected past, it is
+     * reported — the class answers by exposing it, or by writing its own `jsonSerialize()`.
+     */
+    public function testAValueObjectHidingItsStateFailsLoudly(): void
+    {
+        $hidden = Hidden::fromString('secret');
 
         $this->expectException(UnextractableValue::class);
-        (new Serializer())->serialize($schema, new \stdClass());
+        $this->expectExceptionMessageMatches('/public property "\$secret"/');
+        (void) Schematic::serialize($hidden);
+    }
+
+    public function testACollectionHidingItsItemsFailsLoudly(): void
+    {
+        $tags = new OpaqueTags(new Tag('php'));
+
+        $this->expectException(UnextractableValue::class);
+        $this->expectExceptionMessageMatches('/IteratorAggregate/');
+        (void) Schematic::serialize($tags);
+    }
+
+    public function testPrimitivesPassThrough(): void
+    {
+        self::assertSame(['a', 1, true, null], Schematic::serialize(['a', 1, true, null]));
     }
 }

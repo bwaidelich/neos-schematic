@@ -3,12 +3,11 @@
 > [!WARNING]
 > At this stage, this package is **experimental** and subject to change!
 
-Turn unknown input — JSON payloads, form data, database rows — into validated PHP value objects, render those same
-types back out as [JSON Schema](https://json-schema.org/), and read the objects themselves back out as JSON.
+Build validated PHP value objects out of unknown input — JSON payloads, form data, database rows — and read them back
+out again, against [JSON Schema](https://json-schema.org/) the types themselves own.
 
-Schematic is a **reflection-free engine**: a `Schema` describes your classes as a JSON-Schema-inspired structure,
-and the runtime path that coerces input and builds objects never reflects. Schemas are produced once by
-*middleware* and can be cached as plain serialized data.
+Schematic is **a bridge between PHP classes and JSON Schema**. A type owns its schema by implementing
+`Neos\JsonSchema\ProvidesSchema` (returning it from a static `schema()`).
 
 ## Requirements
 
@@ -22,205 +21,471 @@ composer require neos/schematic
 
 ## Quick start
 
-Describe your value objects with attributes, wire a `Schematic`, and map input into instances:
+A value object owns its schema and hands over its own construction path; a shape derives one from its constructor:
 
 ```php
-use Neos\Schematic\Attributes\Description;
-use Neos\Schematic\Attributes\IntegerBased;
-use Neos\Schematic\Attributes\ReflectionMiddleware;
-use Neos\Schematic\Attributes\StringBased;
+use Neos\JsonSchema\ProvidesSchema;
+use Neos\JsonSchema\Schema;
+use Neos\JsonSchema\StringSchema;
+use Neos\Schematic\Discovery\AutoDiscoveringSchema;
 use Neos\Schematic\Schematic;
 
-#[Description('The full name of a contact')]
-#[StringBased(minLength: 1, maxLength: 200)]
-final readonly class ContactName
+final readonly class Slug implements ProvidesSchema
+{
+    public function __construct(public string $value) {}
+
+    public static function schema(): Schema
+    {
+        static $schema = null;
+        return $schema ??= StringSchema::create(minLength: 1, maxLength: 100, pattern: '^[a-z0-9-]+$');
+    }
+}
+
+final readonly class Post implements \JsonSerializable, ProvidesSchema
+{
+    public function __construct(
+        public Slug $slug,
+        public string $author,
+        public string $text,
+    ) {}
+
+    public function jsonSerialize(): mixed
+    {
+        return Schematic::serialize($this);
+    }
+
+    public static function schema(): Schema
+    {
+        static $schema = null;
+        return $schema ??= AutoDiscoveringSchema::analyze(self::class);
+    }
+}
+
+$result = Schematic::map(Post::class, ['slug' => 'hello-world', 'author' => 'Ada', 'text' => 'Hi']);
+
+assert($result->valid === true);
+assert($result->value() instanceof Post);
+assert($result->value()->slug->value === 'hello-world');
+
+// and back out again — the same shape the schema describes
+assert(json_encode($result->value()) === '{"slug":"hello-world","author":"Ada","text":"Hi"}');
+```
+
+Both constructors are public and the engine calls them itself — there is nothing else to wire up. `Slug` implements
+`ProvidesSchema` from **neos/jsonschema**, so any package can read its type without depending on this one.
+
+The `static $schema` is the whole of caching. A schema is class-level and immutable, so building it once is worth
+doing — and **this package holds no state on a class's behalf**: no registry, no schema cache, nothing to reset
+between requests or tests. A class that leaves the line out is asking for its schema to be rebuilt on every call,
+once per level of nesting, on every request — which for `AutoDiscoveringSchema::analyze()` means the whole reflection
+walk again. (The examples further down leave it out where they are making a different point.)
+
+### Owning a schema is opt-in
+
+A class is described because it said so, never because it happened to look describable. Asking for the schema of a class
+that implements nothing is an error:
+
+```php
+// ... Slug and Post from the quick start
+use Neos\Schematic\SchemaNotProvided;
+use Neos\Schematic\Schematic;
+
+final readonly class Untold
+{
+    public function __construct(public string $value) {}
+}
+
+$caught = null;
+try {
+    Schematic::schemaFor(Untold::class);
+} catch (SchemaNotProvided $exception) {
+    $caught = $exception->getMessage();
+}
+assert(str_contains((string) $caught, 'provides no schema: implement'));
+```
+
+Deriving one silently would make the published contract an accident of the constructor — every parameter rename a change
+to it — and would describe classes that were never meant to cross a wire. A class with nothing special to say still
+fills the method in mechanically, with `AutoDiscoveringSchema::analyze(self::class)` as `Post` does above; the
+difference is that it asked. From there analysis recurses into nested types on its own, so only the types a consumer
+*names* need the method.
+
+## The four entry points
+
+| Call                                                                   | What it does                                         |
+|------------------------------------------------------------------------|------------------------------------------------------|
+| `Schematic::schemaFor($class)`                                         | the class's own `schema()` — an error if it has none |
+| `Schematic::instantiate($class, $input, $normalization?)`              | validate, then build — **throws** `CoercionFailed`   |
+| `Schematic::map($class, $input, $normalization?)`                      | validate, then build — returns a `ValidationResult`  |
+| `Schematic::serialize($value)`                                         | read an instance back into primitives                |
+
+`instantiate()` throws because it is what a named constructor calls: there is no half-built value object to hand back.
+`map()` is for a payload arriving from outside, where every issue in it is wanted at once.
+
+## Nothing is built without being validated first
+
+Every entry point validates against the class's own schema before it constructs anything — `map()` reports what is
+wrong, `instantiate()` throws:
+
+```php
+// ... Slug and Post from the quick start
+use Neos\Schematic\CoercionFailed;
+use Neos\Schematic\Schematic;
+
+$slug = Schematic::instantiate(Slug::class, 'hello-world');
+assert($slug->value === 'hello-world');
+
+$caught = null;
+try {
+    Schematic::instantiate(Slug::class, 'Hello World');
+} catch (CoercionFailed $exception) {
+    $caught = $exception->issues->codes();
+}
+assert($caught === ['invalid_pattern']);
+```
+
+The `Slug` inside a `Post` goes through the very same check, because the engine descends into it the same way — there
+is no second, unvalidated path through the engine.
+
+This means a leaf is validated once per level of nesting above it. That is deliberate: at the usual
+one-level-of-value-objects depth it is two passes, and the invariant holding everywhere is worth more than the saving.
+
+A public constructor is still a public constructor, though: `new Slug('Hello World')` is plain PHP and nothing checks
+it. If the invariant has to hold for *every* construction, make the constructor private and offer a named constructor
+that goes through `Schematic::instantiate()` — see below.
+
+### Why the outer pass exists at all
+
+Because `Post::schema()` *embeds* `Slug::schema()`, a whole payload can be judged in one go — which is what lets a bad
+request report everything wrong with it, each issue where it belongs:
+
+```php
+// ... Slug and Post from the quick start
+use Neos\Schematic\Schematic;
+
+$result = Schematic::map(Post::class, ['slug' => 'Hello World', 'author' => 'Ada']);
+
+assert($result->valid === false);
+assert(array_map(fn($issue) => $issue->pathAsString(), $result->issues->toArray()) === ['slug', 'text']);
+assert($result->issues->codes() === ['invalid_pattern', 'required']);
+```
+
+## Construction: the constructor, whatever its visibility
+
+A class opts into being built by implementing `ProvidesSchema`. From there the engine calls its `__construct()` with
+the validated primitives — a public constructor directly, a non-public one through reflection. There is nothing else to
+hand over:
+
+```php
+use Neos\JsonSchema\ProvidesSchema;
+use Neos\JsonSchema\Schema;
+use Neos\JsonSchema\StringSchema;
+use Neos\Schematic\Schematic;
+
+final readonly class Handle implements ProvidesSchema
 {
     private function __construct(public string $value) {}
+
+    public static function fromString(string $value): self
+    {
+        return Schematic::instantiate(self::class, $value);
+    }
+
+    public static function schema(): Schema
+    {
+        return StringSchema::create(pattern: '^[a-z]+$');
+    }
 }
 
-#[IntegerBased(minimum: 0, maximum: 150)]
-final readonly class ContactAge
+assert(Handle::fromString('ada')->value === 'ada');
+assert(Schematic::instantiate(Handle::class, 'ada')->value === 'ada');
+```
+
+`private` is a fence against `new Handle(...)` from anywhere else, and it stays one; it is not a fence against the
+engine the class invited by owning a schema. That opt-in is a decision the class makes once, in its own body, and one
+the engine can actually check — unlike a "call this only from inside the class" rule nothing enforces.
+
+Shapes are built with **named arguments**, so parameter order does not matter; scalars get the value, collections get
+the items spread.
+
+### How the engine reaches a nested type
+
+For a value of class `T`, in order:
+
+1. `T` is an enum → the case is looked up, nothing is constructed;
+2. otherwise → `T::__construct()` is called with the validated primitives, public or not.
+
+**Named constructors are never called by the engine.** A `from*()` method is how a *caller* writes the class's way in,
+and it calls `Schematic::instantiate()` itself — so calling it from the engine would validate the same value twice per
+level of nesting, and turn the obvious `fromString()` into unbounded recursion.
+
+The consequence, and it is the intended trade: **a rule living in a named constructor body, rather than in the schema
+or the constructor, is not enforced on the way in.** That is the same rule the package states for invariants generally
+— the schema is the validator, the constructor is the last word.
+
+## What a class looks like to the engine
+
+Both building and reading back need **no schema at all**: after validation the value already *is* schema-conformant
+primitives, so what remains is the class's own shape. It is decided from the class alone:
+
+| Class                                          | Nature | In                                             | Out                                       |
+|------------------------------------------------|--------|------------------------------------------------|-------------------------------------------|
+| an `enum`                                      | Enum   | `tryFrom()` (backed) / case-name lookup (pure) | `->value` / `->name`                      |
+| one variadic constructor parameter             | ListOf | build each item, spread                        | iterate, or read the property             |
+| one parameter typed `string\|int\|float\|bool` | Scalar | pass the primitive                             | read the single public property           |
+| anything else                                  | Shape  | map array keys to parameters by name           | read each parameter-named public property |
+
+Unambiguous by construction: `Slug{string $value}` is a Scalar, `Tags{Tag ...$tags}` a ListOf,
+`Point{array $coords}` a Shape expecting `['coords' => …]`, and `Wrapper{Inner $inner}` a Shape. A value object wanting
+collection semantics makes its parameter variadic.
+
+```php
+use Neos\JsonSchema\ProvidesSchema;
+use Neos\JsonSchema\Schema;
+use Neos\Schematic\Discovery\AutoDiscoveringSchema;
+use Neos\Schematic\Reflection\ClassShape;
+use Neos\Schematic\Reflection\Nature;
+use Neos\Schematic\Schematic;
+
+final readonly class Tag implements ProvidesSchema
 {
-    private function __construct(public int $value) {}
+    public function __construct(public string $value) {}
+
+    public static function schema(): Schema
+    {
+        return AutoDiscoveringSchema::analyze(self::class);
+    }
 }
 
-#[Description('A contact')]
-final readonly class Contact
+final readonly class Tags implements ProvidesSchema
 {
-    private function __construct(
-        public ContactName $name,
-        public ContactAge $age,
+    /** @var list<Tag> */
+    public array $tags;
+
+    public function __construct(Tag ...$tags)
+    {
+        $this->tags = array_values($tags);
+    }
+
+    public static function schema(): Schema
+    {
+        return AutoDiscoveringSchema::analyze(self::class);
+    }
+}
+
+assert(ClassShape::of(Tag::class)->nature === Nature::Scalar);
+assert(ClassShape::of(Tags::class)->nature === Nature::ListOf);
+
+$tags = Schematic::instantiate(Tags::class, ['php', 'json']);
+assert(Schematic::serialize($tags) === ['php', 'json']);
+```
+
+## Deriving a schema from the class
+
+`AutoDiscoveringSchema::analyze()` reads a class and emits **pure** JSON Schema, following the same natures:
+
+| Nature | Schema                                                                                              |
+|--------|-----------------------------------------------------------------------------------------------------|
+| Enum   | `string` / `integer` with `enum:` of the backing values, or the case names                          |
+| Scalar | the scalar schema of its single parameter                                                           |
+| ListOf | an `array` whose `items` is the variadic parameter's type                                           |
+| Shape  | an `object` of its parameters, `additionalProperties: false`, required = the ones without a default |
+
+A nested type that implements `ProvidesSchema` contributes *its own* `schema()` verbatim; anything else is analyzed in
+turn. `?T` / `T|null` gains a null branch:
+
+```php
+use Neos\Schematic\Discovery\AutoDiscoveringSchema;
+
+enum Status: string
+{
+    case draft = 'draft';
+    case published = 'published';
+}
+
+final readonly class Draft
+{
+    public function __construct(
+        public Status $status,
+        public string $title,
+        public string|null $subtitle = null,
     ) {}
 }
 
-$schematic = Schematic::create(new ReflectionMiddleware());
-
-$result = $schematic->map(Contact::class, ['name' => 'John Doe', 'age' => 45]);
-
-assert($result->success === true);
-
-$contact = $result->value();
-assert($contact instanceof Contact);
-assert($contact->name->value === 'John Doe');
-assert($contact->age->value === 45);
+assert(json_encode(AutoDiscoveringSchema::analyze(Draft::class)) === '{"type":"object","properties":'
+    . '{"status":{"type":"string","enum":["draft","published"]},"title":{"type":"string"},'
+    . '"subtitle":{"anyOf":[{"type":"string"},{"type":"null"}]}},'
+    . '"additionalProperties":false,"required":["status","title"]}');
 ```
 
-Note that the constructors are **private**: instances of `ContactName` can only come into existence through a
-validated path, and `new ContactName('')` is not one of them. Schematic constructs them anyway.
+There are no attributes to read, and no `#[Description]`: a constraint that does not follow from the type belongs in the
+class's own `schema()`, which is the point — the published schema and the enforced rule are one object.
 
-## The two phases
+Analysis rejects what it cannot describe with an `UnsupportedTypeException`: an enum with no cases, a genuine union or
+intersection type, `mixed`, and builtins that are not one of the four JSON scalars. A recursive type raises a
+`CircularReferenceException` naming the cycle, since an embedded schema cannot contain itself.
 
-Mapping is two distinct steps, and you can stop after the first:
+## Input that is always a string
 
-1. **Coerce** — validate and normalize the raw input into schema-conformant *primitives*. Creates no objects,
-   uses no reflection, and is usable on its own as a validator.
-2. **Instantiate** — build the object graph from those primitives.
-
-`coerce()` gives you phase 1 alone. Note that the numeric string `'45'` is normalized to the integer `45` — that
-normalization is what makes this more than plain JSON Schema validation:
+Validation is standard JSON Schema by default, so `"42"` is a string. A path, query or header parameter is only ever a
+string, so those call sites opt into `Normalization::Scalars`:
 
 ```php
-// ...
-$coerced = $schematic->coerce(Contact::class, ['name' => 'John Doe', 'age' => '45']);
+use Neos\JsonSchema\ProvidesSchema;
+use Neos\JsonSchema\Schema;
+use Neos\JsonSchema\Validation\Normalization;
+use Neos\Schematic\Discovery\AutoDiscoveringSchema;
+use Neos\Schematic\Schematic;
 
-assert($coerced->success === true);
-assert($coerced->value() === ['name' => 'John Doe', 'age' => 45]);
-```
-
-Unknown keys are dropped from the coerced value rather than carried along — but only after validation has
-accepted them (with `additionalProperties: false`, which the attribute middleware sets, an unknown key is an
-error rather than something to drop).
-
-## When input is invalid
-
-Invalid input is expected, not exceptional, so nothing throws: `map()` and `coerce()` both return a
-`CoercionResult` that is *either* a value *or* the aggregated issues. Every violation is reported, not just the
-first:
-
-```php
-// ...
-$result = $schematic->map(Contact::class, ['name' => '', 'age' => 500]);
-
-assert($result->success === false);
-assert(count($result->issues) === 2);
-
-$issues = $result->issues->toArray();
-
-assert($issues[0]->pathAsString() === 'name');
-assert($issues[0]->code === 'too_short');
-assert($issues[0]->message === 'Value must be at least 1 character(s) long');
-
-assert($issues[1]->pathAsString() === 'age');
-assert($issues[1]->code === 'too_big');
-assert((string) $issues[1] === 'age: Value must be at most 150 (too_big)');
-```
-
-Each `Issue` carries a machine-readable `code` (the `Neos\JsonSchema\Validation\IssueCode` vocabulary), a human
-message, and the `path` to the offending value — as a dotted string, or as an RFC 6901 JSON Pointer for error
-formats like [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457):
-
-```php
-// ...
-assert($issues[0]->path === ['name']);
-assert($issues[0]->pathAsJsonPointer() === '/name');
-
-$missing = $schematic->map(Contact::class, ['name' => 'John Doe']);
-assert((string) $missing->issues->toArray()[0] === 'age: Missing required property "age" (required)');
-
-$unknown = $schematic->map(Contact::class, ['name' => 'John Doe', 'age' => 45, 'nickname' => 'Johnny']);
-assert((string) $unknown->issues->toArray()[0] === '<root>: Unrecognized property: nickname (unrecognized_keys)');
-```
-
-Reading `value()` on a failed result throws, so a result cannot be mistaken for a value by accident.
-
-## Rendering JSON Schema
-
-The same description that validates input renders back out as a JSON Schema document — so your API documentation
-cannot disagree with your validation:
-
-```php
-// ...
-$jsonSchema = $schematic->schemaFor(Contact::class)->toJsonSchema();
-
-$expected = <<<'JSON'
+enum Rating: int implements ProvidesSchema
 {
-    "type": "object",
-    "description": "A contact",
-    "properties": {
-        "name": {
-            "type": "string",
-            "description": "The full name of a contact",
-            "minLength": 1,
-            "maxLength": 200
-        },
-        "age": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 150
-        }
-    },
-    "additionalProperties": false,
-    "required": [
-        "name",
-        "age"
-    ]
+    case low = 1;
+    case high = 5;
+
+    public static function schema(): Schema
+    {
+        return AutoDiscoveringSchema::analyze(self::class);
+    }
 }
-JSON;
 
-assert(json_encode($jsonSchema, JSON_PRETTY_PRINT) === $expected);
+assert(Schematic::map(Rating::class, '5')->valid === false);                                  // a JSON body
+assert(Schematic::instantiate(Rating::class, '5', normalization: Normalization::Scalars) === Rating::high);
 ```
-
-The result is a `Neos\JsonSchema\Schema` from the [neos/jsonschema](https://github.com/neos/jsonschema) package,
-which is `JsonSerializable` and can also validate values on its own.
 
 ## Serializing back out
 
-The reverse of `map()`: `serialize()` reads an instance back into primitives, ready for `json_encode()`.
+`Schematic::serialize()` reads **public properties only**. Going in, a class exposes itself to the engine by owning a
+schema, and its constructor names exactly what it takes; going out, there is no such statement — a property is either
+public or it is not. So a class with private state exposes it, or writes a `jsonSerialize()` of its own:
 
 ```php
-// ...
-$contact = $schematic->map(Contact::class, ['name' => 'John Doe', 'age' => 45])->value();
+use Neos\Schematic\Schematic;
+use Neos\Schematic\UnextractableValue;
 
-assert($schematic->serialize(Contact::class, $contact) === ['name' => 'John Doe', 'age' => 45]);
-assert(json_encode($schematic->serialize(Contact::class, $contact)) === '{"name":"John Doe","age":45}');
+final readonly class Secret
+{
+    public function __construct(private string $value) {}
+
+    public function reveal(): string
+    {
+        return $this->value;
+    }
+}
+
+$caught = null;
+try {
+    (void) Schematic::serialize(new Secret('hunter2'));
+} catch (UnextractableValue $exception) {
+    $caught = $exception->getMessage();
+}
+assert(str_contains((string) $caught, 'does not expose a public property "$value"'));
 ```
 
-This is driven by the **same** `Schema` that validates input and renders to JSON Schema, so what you emit cannot
-drift away from what you advertise — the output always satisfies the schema you published:
+A class that wants `json_encode($post)` to emit exactly what its schema describes writes the one line itself:
+
+```php (no test)
+public function jsonSerialize(): mixed
+{
+    return Schematic::serialize($this);
+}
+```
+
+There is no trait for it. Implementing `JsonSerializable` is a statement about the class, and a `use` line that
+silently supplies the method hides which of the two ways out the class chose — this one, or a `jsonSerialize()` of
+its own.
+
+A collection is read through `Traversable` when it offers one, and otherwise from the public property named after its
+variadic parameter. One that offers neither raises `UnextractableValue`: a class and the way it is read back disagreeing
+is a programming error, not bad input.
+
+## Making sure the class and its schema still agree
+
+A derived schema cannot drift: `AutoDiscoveringSchema` reads it off the same `ClassShape` the instantiator builds by
+and the serializer reads by, so nullability, requiredness and structure come from one source. A **hand-written**
+`schema()` can drift, and every way it can is invisible until it bites — validation passes, then construction fails
+with a `TypeError` for a null the constructor never accepted, or a `LogicException` for a parameter the schema forgot
+to require. `Conformance` asks, from the class side:
 
 ```php
-// ...
-$primitives = $schematic->serialize(Contact::class, $contact);
-assert($schematic->schemaFor(Contact::class)->toJsonSchema()->validate($primitives)->valid === true);
+use Neos\JsonSchema\Nullable;
+use Neos\JsonSchema\ObjectSchema;
+use Neos\JsonSchema\ProvidesSchema;
+use Neos\JsonSchema\Schema;
+use Neos\JsonSchema\StringSchema;
+use Neos\JsonSchema\Support\ObjectProperties;
+use Neos\Schematic\Conformance;
+
+final readonly class Article implements ProvidesSchema
+{
+    public function __construct(public string $title, public string $subtitle) {}
+
+    public static function schema(): Schema
+    {
+        static $schema = null;
+        return $schema ??= ObjectSchema::create(
+            properties: ObjectProperties::create(
+                title: StringSchema::create(),
+                subtitle: Nullable::wrap(StringSchema::create()),   // the constructor says otherwise
+            ),
+            additionalProperties: false,
+            required: ['title'],                                    // and $subtitle has no default
+        );
+    }
+}
+
+assert(Conformance::check(Article::class) === [
+    '$subtitle: the constructor has no default for it, but the schema does not require it',
+    '$subtitle: the schema accepts null, the constructor does not',
+]);
 ```
 
-That guarantee is why serialization is schema-driven rather than a generic reflecting normalizer: `json_encode()`
-on a value object emits whatever the class happens to expose, with nothing tying it to the schema. Mechanically,
-each `Schema` node names a `ValueExtractor` by class-string exactly as it names an `InstanceFactory` — the
-`ReflectionMiddleware` stamps both, so anything it can map, it can read back.
+It is **not** a runtime guard: the answer is the same for the life of the process, so it belongs in a test —
+`self::assertSame([], Conformance::check(Article::class))` — where a disagreement is what it actually is, a
+programming error, rather than a cost paid on every request. Every question is put to the schema by *validating*
+against it rather than by reading its keywords, so a hand-written `anyOf`, a `oneOf` or anything else answers exactly
+as the validator would.
 
-Every property the schema declares is emitted, including those equal to their constructor default: the schema
-advertises them, so omitting them would make the document narrower than the contract.
+What it compares:
 
-A value object the extractor cannot read — a custom `InstanceFactory` with no matching extractor, or a collection
-that neither implements `IteratorAggregate` nor exposes its items under the constructor parameter's name — throws
-`Serialization\UnextractableValue`. That is a mismatch between a class and its schema, i.e. a programming error,
-so unlike invalid *input* it is not returned as a result.
+| Question | Reported when |
+|----------|---------------|
+| nullability | the schema accepts `null` for a parameter that does not, or refuses one for a parameter that does |
+| requiredness | a parameter has no default and the schema does not require it |
+| structure | the class is a value and the schema a structure (or the reverse), or an array schema without items |
+| naming | the constructor names a parameter the schema has no property for, or the schema publishes one nothing builds |
+| type | a parameter's builtin type is one the schema rejects outright |
+| enum cases | a case serializes to something the schema does not accept |
+
+### The other half: what an instance emits
+
+`check()` asks whether the class can be *built* from what its schema accepts. A public constructor means `new` can
+produce a value validation never saw, and serialization publishes it as it finds it — so the second question needs an
+instance:
+
+```php (no test)
+self::assertSame([], Conformance::checkSerialization($article));
+```
+
+That is the *whole* check for a type that is only ever emitted — one that publishes a schema for the document it
+appears in and writes its own `jsonSerialize()`, with nothing ever mapping a payload onto it. Such a type answers the
+constructor question meaninglessly; it is held to what it puts on the wire.
 
 ## Invariants the schema cannot express
 
-Some rules span several properties — `start < end` — and no JSON Schema keyword covers them. Enforce those in the
-constructor as you normally would: an `\InvalidArgumentException` thrown while constructing is caught and turned
-into an issue, so it joins the same result instead of blowing up the call:
+Some rules span several properties — `start < end` — and no JSON Schema keyword covers them. **The schema is the only
+validator**: a rule it does not express is not enforced on the way in, and a constructor rejecting a value that
+validation accepted means the class and its schema disagree. That is a programming error, so it crashes rather than
+joining the result as an issue:
 
 ```php
-use Neos\Schematic\Attributes\ReflectionMiddleware;
-use Neos\Schematic\Coercion\InvalidValue;
+use Neos\JsonSchema\ProvidesSchema;
+use Neos\JsonSchema\Schema;
+use Neos\Schematic\Discovery\AutoDiscoveringSchema;
 use Neos\Schematic\Schematic;
 
-final readonly class DateRange
+final readonly class DateRange implements ProvidesSchema
 {
-    private function __construct(
+    public function __construct(
         public int $start,
         public int $end,
     ) {
@@ -228,522 +493,54 @@ final readonly class DateRange
             throw new \InvalidArgumentException(sprintf('start (%d) must be less than end (%d)', $start, $end));
         }
     }
+
+    public static function schema(): Schema
+    {
+        return AutoDiscoveringSchema::analyze(self::class);
+    }
 }
 
-$schematic = Schematic::create(new ReflectionMiddleware());
-
-$result = $schematic->map(DateRange::class, ['start' => 10, 'end' => 5]);
-
-assert($result->success === false);
-assert($result->issues->toArray()[0]->code === InvalidValue::ISSUE_CODE);
-assert($result->issues->toArray()[0]->message === 'start (10) must be less than end (5)');
+$caught = null;
+try {
+    (void) Schematic::map(DateRange::class, ['start' => 10, 'end' => 5]);
+} catch (\InvalidArgumentException $exception) {
+    $caught = $exception->getMessage();
+}
+assert($caught === 'start (10) must be less than end (5)');
 ```
 
-`DateRange` carries no attributes at all — a class without them is described by its constructor, which is often
-all you need. To signal an invariant explicitly (rather than relying on the `\InvalidArgumentException`
-adaptation), throw `Neos\Schematic\Coercion\InvalidValue`; any *other* exception propagates, because that is a
-bug rather than bad input.
-
-## Attributes
-
-The attribute classes and the middleware that reads them live in `Neos\Schematic\Attributes`.
-
-| Attribute | Applies to | Effect |
-| --- | --- | --- |
-| `#[StringBased(minLength, maxLength, pattern, format)]` | class | a string wrapped in a class |
-| `#[IntegerBased(minimum, maximum)]` | class | an integer wrapped in a class |
-| `#[FloatBased(minimum, maximum)]` | class | a float wrapped in a class |
-| `#[ListBased(itemClassName, minCount, maxCount)]` | class | a typed collection |
-| `#[Description(value)]` | class | the JSON Schema `description` |
-| `#[Ignore]` | constructor parameter | excluded from the schema (the parameter must have a default) |
-
-A class with none of these is described by its constructor parameters — a *shape*, whose required properties are
-the parameters without a default.
-
-`format` takes a `Neos\JsonSchema\Support\StringFormat` and is enforced, not just annotated:
-
-```php
-use Neos\JsonSchema\Support\StringFormat;
-use Neos\JsonSchema\Validation\IssueCode;
-use Neos\Schematic\Attributes\ListBased;
-use Neos\Schematic\Attributes\ReflectionMiddleware;
-use Neos\Schematic\Attributes\StringBased;
-use Neos\Schematic\Schematic;
-
-#[StringBased(format: StringFormat::email)]
-final readonly class EmailAddress
-{
-    private function __construct(public string $value) {}
-}
-
-#[ListBased(itemClassName: EmailAddress::class, minCount: 1)]
-final readonly class EmailAddresses
-{
-    /** @var list<EmailAddress> */
-    public array $addresses;
-
-    private function __construct(EmailAddress ...$addresses)
-    {
-        $this->addresses = array_values($addresses);
-    }
-}
-
-$schematic = Schematic::create(new ReflectionMiddleware());
-
-$result = $schematic->map(EmailAddresses::class, ['john@example.com', 'jane@example.com']);
-assert($result->success === true);
-assert(count($result->value()->addresses) === 2);
-assert($result->value()->addresses[0] instanceof EmailAddress);
-
-$invalid = $schematic->map(EmailAddresses::class, ['john@example.com', 'not-an-email']);
-assert($invalid->success === false);
-assert($invalid->issues->toArray()[0]->code === IssueCode::InvalidFormat->value);
-assert($invalid->issues->toArray()[0]->pathAsString() === '1');
-
-$empty = $schematic->map(EmailAddresses::class, []);
-assert($empty->issues->toArray()[0]->code === IssueCode::TooFewItems->value);
-```
-
-A `#[ListBased]` class takes its items either variadically (as above) or as a single array argument.
-
-### Enums
-
-An enum is described by its cases, with no attribute needed. A **backed** enum uses its backing values (and an
-`int` backing type gives an integer schema); a **pure** enum uses its case names.
-
-```php
-use Neos\JsonSchema\Validation\IssueCode;
-use Neos\Schematic\Attributes\Description;
-use Neos\Schematic\Attributes\ReflectionMiddleware;
-use Neos\Schematic\Schematic;
-
-#[Description('Whether an account is still reachable')]
-enum Status: string
-{
-    case active = 'active';
-    case archived = 'archived';
-}
-
-enum Channel
-{
-    case email;
-    case phone;
-}
-
-$schematic = Schematic::create(new ReflectionMiddleware());
-
-assert($schematic->map(Status::class, 'archived')->value() === Status::archived);
-// a pure enum is addressed by case name
-assert($schematic->map(Channel::class, 'phone')->value() === Channel::phone);
-
-$invalid = $schematic->map(Status::class, 'deleted');
-assert($invalid->success === false);
-assert($invalid->issues->toArray()[0]->code === IssueCode::InvalidEnumValue->value);
-```
-
-The rendered JSON Schema is a plain `enum` constraint:
-
-```php
-// ...
-$json = json_encode($schematic->schemaFor(Status::class)->toJsonSchema());
-assert($json === '{"type":"string","description":"Whether an account is still reachable","enum":["active","archived"]}');
-```
-
-An enum declaring no cases is rejected with an `UnsupportedTypeException` — it describes a type no value can
-inhabit.
-
-### Nullable properties
-
-A constructor parameter typed `Foo|null` accepts `null` in addition to `Foo`. Nullability and *optionality* are
-independent: a parameter without a default stays **required**, so the key must be present — `null` is simply an
-accepted value for it. Give it a default and it becomes optional as usual.
-
-```php
-use Neos\JsonSchema\Validation\IssueCode;
-use Neos\Schematic\Attributes\ReflectionMiddleware;
-use Neos\Schematic\Attributes\StringBased;
-use Neos\Schematic\Schematic;
-
-#[StringBased(minLength: 1)]
-final readonly class Nickname
-{
-    private function __construct(public string $value) {}
-}
-
-final readonly class Player
-{
-    private function __construct(
-        public string $name,
-        public Nickname|null $nickname,
-    ) {}
-}
-
-$schematic = Schematic::create(new ReflectionMiddleware());
-
-$withNickname = $schematic->map(Player::class, ['name' => 'Ada', 'nickname' => 'The Countess']);
-assert($withNickname->value()->nickname instanceof Nickname);
-
-$withoutNickname = $schematic->map(Player::class, ['name' => 'Ada', 'nickname' => null]);
-assert($withoutNickname->value()->nickname === null);
-```
-
-The value object is never constructed with `null` — instantiation short-circuits first, so an
-`InstanceFactory` only ever sees a real value. Constraints on the non-`null` side still apply, and you get the
-*precise* issue rather than a vague "matches nothing":
-
-```php
-// ...
-$tooShort = $schematic->map(Player::class, ['name' => 'Ada', 'nickname' => '']);
-assert($tooShort->success === false);
-assert($tooShort->issues->toArray()[0]->code === IssueCode::TooShort->value);
-assert($tooShort->issues->toArray()[0]->pathAsString() === 'nickname');
-```
-
-In the rendered JSON Schema a nullable node becomes `anyOf: [<the type>, {"type": "null"}]`:
-
-```php
-// ...
-$json = json_encode($schematic->schemaFor(Player::class)->toJsonSchema());
-assert(str_contains((string) $json, '"anyOf":[{"type":"string","minLength":1},{"type":"null"}]'));
-// still required — nullable is not the same as optional
-assert(str_contains((string) $json, '"required":["name","nickname"]'));
-```
-
-## Without the attributes
-
-The attributes are **opt-in batteries, not the engine**. They live in a namespace of their own that depends on
-the engine and that the engine never references — you can ignore them entirely and describe your types yourself,
-which is also how you support types you don't own (a third-party class, an enum, a `DateTimeImmutable`).
-
-A `SchemaMiddleware` recognises a class and returns a `Schema` for it; anything it doesn't recognise it passes to
-`$next`. An `InstanceFactory` says how to build the object once the value has been validated:
-
-```php
-use Neos\JsonSchema\StringSchema;
-use Neos\JsonSchema\Support\StringFormat;
-use Neos\Schematic\Attributes\ReflectionMiddleware;
-use Neos\Schematic\Generation\SchemaGenerator;
-use Neos\Schematic\Generation\SchemaMiddleware;
-use Neos\Schematic\Instantiation\InstanceFactory;
-use Neos\Schematic\Instantiation\Instantiator;
-use Neos\Schematic\Schema\Schema;
-use Neos\Schematic\Schematic;
-
-final class DateTimeFactory implements InstanceFactory
-{
-    public function instantiate(Schema $schema, mixed $value, Instantiator $instantiator): mixed
-    {
-        return new \DateTimeImmutable((string) $value);
-    }
-}
-
-final class DateTimeMiddleware implements SchemaMiddleware
-{
-    public function process(string $className, SchemaGenerator $next, SchemaGenerator $root): Schema
-    {
-        if ($className !== \DateTimeImmutable::class) {
-            return $next->generate($className);
-        }
-        return Schema::scalar(
-            StringSchema::create(format: StringFormat::date_time),
-            \DateTimeImmutable::class,
-            DateTimeFactory::class,
-        );
-    }
-}
-
-final readonly class Appointment
-{
-    private function __construct(
-        public string $title,
-        public \DateTimeImmutable $start,
-    ) {}
-}
-
-$schematic = Schematic::create(new DateTimeMiddleware(), new ReflectionMiddleware());
-
-$result = $schematic->map(Appointment::class, ['title' => 'Standup', 'start' => '2024-01-15T09:00:00+00:00']);
-
-assert($result->success === true);
-assert($result->value()->start instanceof \DateTimeImmutable);
-assert($result->value()->start->format('Y-m-d H:i') === '2024-01-15 09:00');
-
-$invalid = $schematic->map(Appointment::class, ['title' => 'Standup', 'start' => 'yesterday']);
-assert((string) $invalid->issues->toArray()[0] === 'start: Value is not a valid "date-time" (invalid_format)');
-```
-
-Middleware is ordered: the first one that recognises a class wins, and each may also call `$next` and *augment*
-the result. Nested types re-enter the pipeline from the top, which is why `ReflectionMiddleware` picks up the
-`DateTimeImmutable` property above without knowing anything about it. A factory is referenced **by class-string**,
-never as an instance, so the whole `Schema` graph stays serializable.
-
-Middleware is also how the engine stays honest about reflection: `ReflectionMiddleware` reflects while *building*
-a schema, and the result is plain data that a cache can serve instead.
-
-## Self-describing value objects
-
-A class can expose its own type by implementing `Neos\JsonSchema\ProvidesSchema` — a contract that depends on
-`neos/jsonschema` alone, so a package can describe its value objects without taking on schematic as a dependency.
-`ProvidesSchemaMiddleware` bridges any such class into a coercible one, calling the conventional named
-constructor (`fromString`, `fromInteger`, `fromFloat`, `fromBoolean`, `fromArray`, or `from`):
-
-```php
-use Neos\JsonSchema\ProvidesSchema;
-use Neos\JsonSchema\Schema as JsonSchema;
-use Neos\JsonSchema\StringSchema;
-use Neos\Schematic\Generation\Middleware\ProvidesSchemaMiddleware;
-use Neos\Schematic\Schematic;
-
-final readonly class ProductId implements ProvidesSchema
-{
-    private function __construct(public string $value) {}
-
-    public static function fromString(string $value): self
-    {
-        return new self($value);
-    }
-
-    public static function schema(): JsonSchema
-    {
-        return StringSchema::create(description: 'A product identifier', pattern: '^P-\d{4}$');
-    }
-}
-
-$schematic = Schematic::create(new ProvidesSchemaMiddleware());
-
-$result = $schematic->map(ProductId::class, 'P-1234');
-assert($result->success === true);
-assert($result->value() instanceof ProductId);
-assert($result->value()->value === 'P-1234');
-
-$invalid = $schematic->map(ProductId::class, 'nope');
-assert($invalid->success === false);
-assert($invalid->issues->toArray()[0]->code === 'invalid_pattern');
-```
-
-This bridge covers value objects backed by a *scalar* schema. Describe composite ones with a middleware of your
-own (or with the attributes).
-
-## Caching
-
-Generating a schema reflects; using one does not. Put `CachingMiddleware` first in the chain and the reflection
-happens once per class, after which a PSR-16 cache serves the serialized graph:
-
-<details>
-<summary>The throwaway <code>InMemoryCache</code> used below</summary>
-
-Any PSR-16 implementation will do — `symfony/cache` and `laminas/laminas-cache` both ship one. This is the
-minimal version, spelled out so the example below runs as written:
-
-```php
-final class InMemoryCache implements \Psr\SimpleCache\CacheInterface
-{
-    /** @var array<string, mixed> */
-    private array $items = [];
-
-    public int $hits = 0;
-    public int $misses = 0;
-
-    public function get(string $key, mixed $default = null): mixed
-    {
-        if (!array_key_exists($key, $this->items)) {
-            $this->misses++;
-            return $default;
-        }
-        $this->hits++;
-        return $this->items[$key];
-    }
-
-    public function set(string $key, mixed $value, \DateInterval|int|null $ttl = null): bool
-    {
-        $this->items[$key] = $value;
-        return true;
-    }
-
-    public function delete(string $key): bool
-    {
-        unset($this->items[$key]);
-        return true;
-    }
-
-    public function clear(): bool
-    {
-        $this->items = [];
-        return true;
-    }
-
-    public function getMultiple(iterable $keys, mixed $default = null): iterable
-    {
-        foreach ($keys as $key) {
-            yield $key => $this->get($key, $default);
-        }
-    }
-
-    public function setMultiple(iterable $values, \DateInterval|int|null $ttl = null): bool
-    {
-        foreach ($values as $key => $value) {
-            $this->set($key, $value);
-        }
-        return true;
-    }
-
-    public function deleteMultiple(iterable $keys): bool
-    {
-        foreach ($keys as $key) {
-            $this->delete($key);
-        }
-        return true;
-    }
-
-    public function has(string $key): bool
-    {
-        return array_key_exists($key, $this->items);
-    }
-}
-```
-
-</details>
-
-```php
-// ...
-use Neos\Schematic\Attributes\ReflectionMiddleware;
-use Neos\Schematic\Attributes\StringBased;
-use Neos\Schematic\Generation\Middleware\CachingMiddleware;
-use Neos\Schematic\Schematic;
-
-#[StringBased(minLength: 1)]
-final readonly class Sku
-{
-    private function __construct(public string $value) {}
-}
-
-$cache = new InMemoryCache(); // any PSR-16 cache
-
-$schematic = Schematic::create(new CachingMiddleware($cache), new ReflectionMiddleware());
-
-assert($schematic->map(Sku::class, 'ABC-1')->value()->value === 'ABC-1');
-assert($cache->misses === 1);
-
-// the second schema for the same class comes from the cache, without reflecting
-assert($schematic->map(Sku::class, 'ABC-2')->value()->value === 'ABC-2');
-assert($cache->hits === 1);
-```
-
-Because nested types re-enter the pipeline, each named type is cached independently.
-
-## Factories with dependencies
-
-Factories and Extractors are resolved by a `FactoryResolver` / `ExtractorResolver`. The default one builds every
-entry with `new`, so a factory must have no required constructor arguments. If a factory needs collaborators, hand
-the application's PSR-11 container to `ContainerFactoryResolver` — anything the container doesn't know is still
-built with `new`:
-
-```php
-use Neos\JsonSchema\StringSchema;
-use Neos\Schematic\Generation\SchemaFactory;
-use Neos\Schematic\Generation\SchemaGenerator;
-use Neos\Schematic\Generation\SchemaMiddleware;
-use Neos\Schematic\Instantiation\ContainerFactoryResolver;
-use Neos\Schematic\Instantiation\InstanceFactory;
-use Neos\Schematic\Instantiation\Instantiator;
-use Neos\Schematic\Schema\Schema;
-use Neos\Schematic\Schematic;
-use Psr\Container\ContainerInterface;
-
-final readonly class Slug
-{
-    public function __construct(public string $value) {}
-}
-
-final readonly class Slugifier
-{
-    public function slugify(string $value): string
-    {
-        return strtolower(str_replace(' ', '-', trim($value)));
-    }
-}
-
-final readonly class SlugFactory implements InstanceFactory
-{
-    public function __construct(private Slugifier $slugifier) {}
-
-    public function instantiate(Schema $schema, mixed $value, Instantiator $instantiator): mixed
-    {
-        return new Slug($this->slugifier->slugify((string) $value));
-    }
-}
-
-final class SlugMiddleware implements SchemaMiddleware
-{
-    public function process(string $className, SchemaGenerator $next, SchemaGenerator $root): Schema
-    {
-        if ($className !== Slug::class) {
-            return $next->generate($className);
-        }
-        return Schema::scalar(StringSchema::create(minLength: 1), Slug::class, SlugFactory::class);
-    }
-}
-
-$container = new class (new Slugifier()) implements ContainerInterface {
-    public function __construct(private readonly Slugifier $slugifier) {}
-
-    public function has(string $id): bool
-    {
-        return $id === SlugFactory::class;
-    }
-
-    public function get(string $id): mixed
-    {
-        return new SlugFactory($this->slugifier);
-    }
-};
-
-$schematic = new Schematic(
-    new SchemaFactory(new SlugMiddleware()),
-    instantiator: new Instantiator(new ContainerFactoryResolver($container)),
-);
-
-$result = $schematic->map(Slug::class, 'Hello World');
-
-assert($result->success === true);
-assert($result->value()->value === 'hello-world');
-```
-
-## Entry points
-
-`Schematic` is a thin facade; every phase remains individually usable, and injecting the piece you need keeps
-your own seams honest:
-
-| Class | Role |
-| --- | --- |
-| `Schematic` | the facade: `schemaFor()`, `map()`, `coerce()`, `serialize()` |
-| `Generation\SchemaFactory` | the wired middleware chain: `for(class): Schema` |
-| `Coercion\Coercer` | phase 1 on a `Schema` you already have |
-| `Instantiation\Instantiator` | phase 2 |
-| `Instantiation\Mapper` | both phases on a `Schema` you already have |
-| `Serialization\Serializer` | the way back out, on a `Schema` you already have |
+To have such a rule reported as bad *input*, it has to reach the schema: express it there, or validate before mapping.
+Nothing downstream turns an exception back into an issue.
 
 ## Known limitations
 
-- An **interface or abstract class** describes no shape of its own, so the middleware passes it on and an
-  unhandled one ends in an `UnsupportedTypeException`. Polymorphism is not supported: a payload whose type is
-  decided by one of its own keys has no schema this package can generate.
-- Constructor parameters must be **single named types**. Genuine union and intersection types are rejected —
-  but a **nullable** type (`Foo|null`, equivalently `?Foo`) is supported, see below. `mixed` and a bare `null`
-  are not: they report as nullable to reflection but describe no shape, so they are still rejected.
-- **Recursive types are rejected**, with a `Generation\CircularReferenceException` naming the cycle path. A
-  `Schema` node holds its children directly, so it cannot represent a cycle — and the caching middleware cannot
-  break one either, since it stores an entry only *after* generation finishes. This covers the innocuous-looking
-  `Node|null $parent` as well as cycles through several classes.
-- `array` and `iterable` parameters are rejected — describe a collection as a `#[ListBased]` class instead.
-- `#[Description]` is read on classes only; on a constructor parameter it is currently ignored.
-- The **combinators** (`anyOf`, `oneOf`, `allOf`, `not`) can be *validated* by `neos/jsonschema`, but coercion
-  cannot resolve them: the `Coercer` throws rather than guess.
+- **Constructor parameters must be single named types.** Genuine unions and intersections are rejected; a **nullable**
+  type (`?Foo`, `Foo|null`) is supported. `mixed` and a bare `null` are not — they report as nullable to reflection but
+  describe no shape.
+- **Recursive types are rejected**, with a `CircularReferenceException` naming the cycle. A schema embeds its children
+  directly, so it cannot represent one. (`neos/jsonschema` ships a `ReferenceSchema`, so this may change.)
+- **Polymorphism is not supported.** A payload whose type is decided by one of its own keys has no schema this package
+  derives. A class wanting it writes a `schema()` returning `OneOfSchema`, and a named constructor of its own that
+  switches on the tag — the engine builds only what a single constructor describes.
+- **Serialization reads public properties.** A class with private state writes its own `jsonSerialize()`.
 
 ## Architecture
 
-Every PHP example in this README is executed by `tests/Documentation/ReadmeCodeBlockTest.php`, so the
-documentation cannot drift from the code.
+```
+src/
+  Schematic.php                          the four entry points
+  CoercionFailed.php                     input did not satisfy the class's schema
+  SchemaNotProvided.php                  the class owns no schema, and none is invented for it
+  UnextractableValue.php                 the instance does not expose what its shape names
+  Conformance.php                        does a class still agree with the schema it publishes?
+  Reflection/ClassShape.php (+ Nature)   what a class is, and its constructor parameters
+  Discovery/AutoDiscoveringSchema.php    a schema derived from the class, when a class asks for one
+  Instantiation/Instantiator.php         primitives -> instance, no schema involved
+  Serialization/Serializer.php           instance -> primitives, no schema involved
+```
+
+Everything about *data* lives in `neos/jsonschema`: `Schema::validate()` normalizes, validates and projects, and hands
+back the value it read. Schematic adds reflection over PHP classes on either side of it, and nothing more.
 
 ## Contribution
 

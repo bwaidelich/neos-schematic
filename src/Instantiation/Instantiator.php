@@ -4,67 +4,157 @@ declare(strict_types=1);
 
 namespace Neos\Schematic\Instantiation;
 
-use Neos\Schematic\Coercion\InvalidValue;
-use Neos\Schematic\Schema\Kind;
-use Neos\Schematic\Schema\Schema;
+use Neos\Schematic\Reflection\ClassShape;
+use Neos\Schematic\Reflection\Nature;
+use Neos\Schematic\Schematic;
 
 /**
- * Phase 2: builds the target PHP object graph from an already-coerced primitive value.
+ * Builds an instance from **already validated** primitives — no schema involved.
  *
- * For a node that names a {@see InstanceFactory}, it resolves and invokes it, passing itself as the recurse handle so the
- * factory drives descent into children. For a node *without* a factory it recurses structurally, leaving the value
- * as coerced primitives. This is the only place construction happens; it uses no reflection.
+ * After validation the value already *is* schema-conformant, so nothing is left to check: what remains is the
+ * class's own shape, which {@see ClassShape} reads. Every branch below is therefore a statement about PHP, not
+ * about JSON Schema.
+ *
+ * **The constructor is the way in, whatever its visibility.** A class opts into being built by implementing
+ * `ProvidesSchema`; from there its `__construct()` is called with the primitives its parameters name — a public
+ * one directly, a non-public one through reflection. The engine deliberately does *not* call `from*()` named
+ * constructors: a named constructor is how a *caller* writes the class's invariant down, and it in turn calls
+ * {@see Schematic::instantiate()}, so calling it from here would validate the same value twice per level of
+ * nesting and turn the obvious `fromString()` into unbounded recursion.
+ *
+ * The consequence, and it is the intended trade: **a rule that lives in a named constructor body rather than in
+ * the schema or the constructor is not enforced on the way in.** That is the same rule the package states for
+ * invariants generally — the schema is the validator, the constructor is the last word, and anything else is not
+ * part of the contract.
+ *
+ * Descent into a class-typed parameter goes back through {@see Schematic::instantiate()}, so a nested value object
+ * is validated against *its own* schema. There is no second, construct-only path to keep in step with this one.
+ *
+ * @internal reached through {@see Schematic::instantiate()}
  */
 final class Instantiator
 {
-    private readonly FactoryResolver $factoryResolver;
+    private function __construct() {}
 
-    public function __construct(FactoryResolver|null $factoryResolver = null)
+    /**
+     * @template T of object
+     * @param class-string<T> $className
+     * @return T
+     */
+    public static function build(string $className, mixed $value): object
     {
-        $this->factoryResolver = $factoryResolver ?? new NewFactoryResolver();
+        $shape = ClassShape::of($className);
+        if ($shape->nature === Nature::Enum) {
+            /** @var T */
+            return self::enumCase($className, $value);
+        }
+        $arguments = self::arguments($shape->nature, $shape->parameters, $value, $className);
+        // named arguments for a shape, so declaration order stops mattering; positional for the rest
+        $positional = $shape->nature === Nature::Shape ? $arguments : array_values($arguments);
+        /** @var \ReflectionClass<T> $reflectionClass */
+        $reflectionClass = new \ReflectionClass($className);
+        $constructor = $reflectionClass->getConstructor();
+        if ($constructor === null || $constructor->isPublic()) {
+            return $reflectionClass->newInstanceArgs($positional);
+        }
+        // A non-public constructor is not a fence against this engine — the class asked to be built by
+        // implementing ProvidesSchema — it is a fence against `new` from anywhere else, and it stays one.
+        $instance = $reflectionClass->newInstanceWithoutConstructor();
+        $constructor->invokeArgs($instance, $positional);
+        return $instance;
     }
 
     /**
-     * @param mixed $value an already-coerced value (as returned by the Coercer)
-     * @throws InvalidValue if a InstanceFactory rejects the value
+     * The constructor arguments, keyed by parameter name for a shape (so they can be passed as named arguments and
+     * declaration order stops mattering) and positional for the other natures.
+     *
+     * @param list<\ReflectionParameter> $parameters
+     * @param class-string $className
+     * @return array<string, mixed>
      */
-    public function instantiate(Schema $schema, mixed $value): mixed
+    private static function arguments(Nature $nature, array $parameters, mixed $value, string $className): array
     {
-        if ($schema->nullable && $value === null) {
-            // short-circuit *before* the factory: a factory builds the target, and `null` is the absence of one.
-            // Without this, ValueFactory would reach `new ContactName(null)` and fail with a TypeError.
+        if ($nature === Nature::Scalar) {
+            return ['value' => $value];
+        }
+        if ($nature === Nature::ListOf) {
+            if (!is_array($value)) {
+                throw new \LogicException(sprintf('Expected a list to build "%s", got %s', $className, get_debug_type($value)), 1783600403);
+            }
+            $itemType = self::classType($parameters[0] ?? null);
+            $items = [];
+            foreach ($value as $index => $item) {
+                $items[(string) $index] = $itemType === null ? $item : Schematic::instantiate($itemType, $item);
+            }
+            return $items;
+        }
+        if (!is_array($value)) {
+            throw new \LogicException(sprintf('Expected an array to build "%s", got %s', $className, get_debug_type($value)), 1783600404);
+        }
+        $arguments = [];
+        foreach ($parameters as $parameter) {
+            $name = $parameter->getName();
+            if (!array_key_exists($name, $value)) {
+                if ($parameter->isDefaultValueAvailable()) {
+                    continue;
+                }
+                // the schema declares a parameter without a default as required, so validation already rejected
+                // an input missing it
+                throw new \LogicException(sprintf('Missing value for required parameter "$%s" of "%s"', $name, $className), 1783600405);
+            }
+            $arguments[$name] = self::argument($parameter, $value[$name]);
+        }
+        return $arguments;
+    }
+
+    private static function argument(\ReflectionParameter $parameter, mixed $value): mixed
+    {
+        $className = self::classType($parameter);
+        if ($className === null || $value === null) {
+            return $value;
+        }
+        return Schematic::instantiate($className, $value);
+    }
+
+    /**
+     * The class a parameter is typed by, or `null` when it is a builtin (`?Foo` counts as `Foo`).
+     *
+     * @return class-string|null
+     */
+    private static function classType(\ReflectionParameter|null $parameter): string|null
+    {
+        $type = $parameter?->getType();
+        if (!$type instanceof \ReflectionNamedType || $type->isBuiltin()) {
             return null;
         }
-        if ($schema->factory !== null) {
-            return $this->factoryResolver->resolve($schema->factory)->instantiate($schema, $value, $this);
-        }
-        return match ($schema->kind) {
-            Kind::Object => $this->instantiateObjectStructurally($schema, $value),
-            Kind::List => $this->instantiateArrayStructurally($schema, $value),
-            Kind::Scalar => $value,
-        };
+        /** @var class-string $name */
+        $name = $type->getName();
+        return $name;
     }
 
-    private function instantiateObjectStructurally(Schema $schema, mixed $value): mixed
+    /**
+     * Enum cases are singletons, so they are looked up rather than built: a *backed* enum by its backing value,
+     * a *pure* one by its case name — mirroring what the schema published for it.
+     *
+     * @param class-string $className
+     */
+    private static function enumCase(string $className, mixed $value): \UnitEnum
     {
-        if (!is_array($value)) {
-            return $value;
+        if (!is_subclass_of($className, \UnitEnum::class)) {
+            throw new \LogicException(sprintf('"%s" is not an enum', $className), 1783600406);
         }
-        $result = [];
-        foreach ($value as $name => $propertyValue) {
-            $result[$name] = isset($schema->properties[$name])
-                ? $this->instantiate($schema->properties[$name], $propertyValue)
-                : $propertyValue;
+        if (is_subclass_of($className, \BackedEnum::class)) {
+            if (!is_string($value) && !is_int($value)) {
+                throw new \LogicException(sprintf('Expected a string or integer to resolve a case of "%s", got %s', $className, get_debug_type($value)), 1783600407);
+            }
+            return $className::tryFrom($value)
+                ?? throw new \LogicException(sprintf('Value "%s" is not a case of enum "%s"', $value, $className), 1783600408);
         }
-        return $result;
-    }
-
-    private function instantiateArrayStructurally(Schema $schema, mixed $value): mixed
-    {
-        if (!is_array($value) || $schema->items === null) {
-            return $value;
+        foreach ($className::cases() as $case) {
+            if ($case->name === $value) {
+                return $case;
+            }
         }
-        $itemSchema = $schema->items;
-        return array_map(fn(mixed $item): mixed => $this->instantiate($itemSchema, $item), $value);
+        throw new \LogicException(sprintf('Value "%s" is not a case of enum "%s"', is_scalar($value) ? (string) $value : get_debug_type($value), $className), 1783600409);
     }
 }

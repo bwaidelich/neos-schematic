@@ -1,6 +1,6 @@
 {
     "name": "neos/schematic",
-    "description": "Engine for coercion-capable schemas: describe PHP value objects (with attributes, or your own generation middleware), safely coerce unknown input into instances, and render to JSON Schema.",
+    "description": "The bridge between PHP classes and JSON Schema: a type owns its schema by returning it from a static schema(), and Schematic validates input against it, builds the instance, and reads it back out.",
     "type": "library",
     "support": {
         "source": "https://github.com/neos/schematic.git",
@@ -9,18 +9,13 @@
     },
     "require": {
         "php": ">=8.4",
-        "neos/jsonschema": "dev-main",
-        "psr/simple-cache": "^2 || ^3"
-    },
-    "suggest": {
-        "psr/container": "To resolve Factories that have dependencies via a PSR-11 container (ContainerFactoryResolver)"
+        "neos/jsonschema": "dev-main"
     },
     "require-dev": {
         "roave/security-advisories": "dev-latest",
         "phpstan/phpstan": "^2",
         "friendsofphp/php-cs-fixer": "^3",
-        "phpunit/phpunit": "^10 || ^11 || ^12",
-        "psr/container": "^1 || ^2"
+        "phpunit/phpunit": "^10 || ^11 || ^12"
     },
     "repositories": [
         {

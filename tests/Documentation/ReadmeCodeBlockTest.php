@@ -107,7 +107,8 @@ final class ReadmeCodeBlockTest extends TestCase
                 if ($trimmed === '<?php' || str_starts_with($trimmed, 'declare(strict_types')) {
                     continue;
                 }
-                if (preg_match('/^use\s+[^;]+;$/', $trimmed) === 1) {
+                // an import is unindented; an indented `use SomeTrait;` is a trait use inside a class body
+                if ($line === $trimmed && preg_match('/^use\s+[^;]+;$/', $trimmed) === 1) {
                     $imports[$trimmed] = true;
                     continue;
                 }

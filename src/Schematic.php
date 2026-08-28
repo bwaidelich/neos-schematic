@@ -4,101 +4,123 @@ declare(strict_types=1);
 
 namespace Neos\Schematic;
 
-use Neos\Schematic\Coercion\Coercer;
-use Neos\Schematic\Coercion\CoercionResult;
-use Neos\Schematic\Generation\SchemaFactory;
-use Neos\Schematic\Generation\SchemaMiddleware;
+use Neos\JsonSchema\ProvidesSchema;
+use Neos\JsonSchema\Schema;
+use Neos\JsonSchema\Validation\Normalization;
+use Neos\JsonSchema\Validation\ValidationResult;
 use Neos\Schematic\Instantiation\Instantiator;
-use Neos\Schematic\Instantiation\Mapper;
-use Neos\Schematic\Schema\Schema;
 use Neos\Schematic\Serialization\Serializer;
 
 /**
- * The entry point: wires the three services (generation, coercion, instantiation) into the two calls a consumer
- * usually makes — "give me the schema for this class" and "turn this input into an instance of this class".
+ * The bridge between PHP classes and JSON Schema — and nothing else. A type owns its schema by returning it from a
+ * static `schema()`, and a type that does not is refused rather than guessed at; there is no registry, no
+ * container and no state of its own to wire up, so every entry point here is static:
  *
- * Wired once with the chosen {@see SchemaMiddleware} chain (a caching middleware typically first). The engine
- * itself ships no middleware that produces a schema from a plain class; the batteries (attributes + a reflecting
- * middleware) live in a namespace of their own and are opt-in — you name them here or not at all:
+ *     final readonly class Slug implements ProvidesSchema
+ *     {
+ *         private function __construct(public string $value) {}
  *
- *     $schematic = Schematic::create(new CachingMiddleware($cache), new ReflectionMiddleware());
- *     $contact = $schematic->map(Contact::class, $input)->value();
+ *         public static function fromString(string $value): self
+ *         {
+ *             return Schematic::instantiate(self::class, $value);
+ *         }
  *
- * Each phase remains individually usable: {@see SchemaFactory}, {@see Coercer}, {@see Instantiator} and
- * {@see Serializer} can be injected and driven directly — this class adds no behaviour of its own.
+ *         public static function schema(): Schema
+ *         {
+ *             static $schema = null;
+ *             return $schema ??= StringSchema::create(...);
+ *         }
+ *     }
+ *
+ * **Validation happens on every path that produces an instance**, which is what makes a value object valid however
+ * it was built: {@see self::instantiate()} validates against the class's own schema before constructing, and
+ * {@see self::map()} validates the whole payload first so that one bad request reports every issue in it at once.
+ * A leaf is therefore validated once per level of nesting above it — accepted deliberately, because the invariant
+ * holding everywhere is worth more than the saving.
+ *
+ * **Construction is the constructor, always.** Whatever a class calls its own way in, the engine builds it by
+ * calling `__construct()` with the validated primitives — see {@see Instantiator}. There is no closure to hand
+ * over, no naming convention to satisfy, and no second entry point for a class that keeps its constructor
+ * private: opting in is implementing {@see ProvidesSchema}, which is a decision the class makes once, in its own
+ * body, and which the engine can actually check.
  */
 final class Schematic
 {
-    private readonly SchemaFactory $schemaFactory;
-    private readonly Coercer $coercer;
-    private readonly Mapper $mapper;
-    private readonly Serializer $serializer;
-
-    public function __construct(
-        SchemaFactory $schemaFactory,
-        Coercer|null $coercer = null,
-        Instantiator|null $instantiator = null,
-        Serializer|null $serializer = null,
-    ) {
-        $this->schemaFactory = $schemaFactory;
-        $this->coercer = $coercer ?? new Coercer();
-        $this->mapper = new Mapper($this->coercer, $instantiator ?? new Instantiator());
-        $this->serializer = $serializer ?? new Serializer();
-    }
+    private function __construct() {}
 
     /**
-     * Wires a Schematic with the given middleware chain and the default coercion / instantiation services.
-     */
-    public static function create(SchemaMiddleware ...$middlewares): self
-    {
-        return new self(new SchemaFactory(...$middlewares));
-    }
-
-    /**
-     * The Schema for a class, as produced by the middleware chain (renderable via {@see Schema::toJsonSchema()}).
+     * The JSON Schema a class owns — the one place the opt-in is decided.
+     *
+     * A class says it owns one by implementing {@see ProvidesSchema}; one that does not is an error rather than
+     * something to derive a contract for behind its back — see {@see SchemaNotProvided}.
+     *
+     * Nothing is cached here, or anywhere else in this package. Building a schema once is worth doing, and it is
+     * the class's own business: `static $schema = null; return $schema ??= ...;` in `schema()`. A class leaving
+     * that out is asking for the schema to be rebuilt on every call, once per level of nesting, on every request.
      *
      * @param class-string $className
-     * @throws Generation\UnsupportedTypeException if no middleware produced a schema for the class
+     * @throws SchemaNotProvided if the class does not provide a schema
      */
-    public function schemaFor(string $className): Schema
+    public static function schemaFor(string $className): Schema
     {
-        return $this->schemaFactory->for($className);
+        if (!is_a($className, ProvidesSchema::class, true)) {
+            throw SchemaNotProvided::forClass($className);
+        }
+        return $className::schema();
     }
 
     /**
-     * Both phases: coerce the input against the class's schema, then build the instance.
+     * Builds an instance, validating the input against the class's own schema first.
      *
-     * @param class-string $className
+     * Throws rather than returning a result: this is the path a named constructor takes, and a value object that
+     * cannot be built has no half-built form to hand back. Use {@see self::map()} for input from outside.
+     *
+     * Safe to call from the class's own named constructor — the engine constructs directly and never calls back
+     * into `from*()`, so there is no recursion to avoid, and no closure to hand over for a constructor the class
+     * keeps private.
+     *
+     * @template T of object
+     * @param class-string<T> $className
+     * @return T
+     * @throws CoercionFailed if the input does not satisfy the class's schema
      */
-    #[\NoDiscard('inspect the CoercionResult; discarding it drops the mapping outcome')]
-    public function map(string $className, mixed $input): CoercionResult
+    public static function instantiate(string $className, mixed $input, Normalization $normalization = Normalization::None): object
     {
-        return $this->mapper->map($this->schemaFor($className), $input);
+        $result = self::schemaFor($className)->validate($input, $normalization);
+        if (!$result->valid) {
+            throw CoercionFailed::forClass($className, $result->issues);
+        }
+        return Instantiator::build($className, $result->value());
     }
 
     /**
-     * Phase 1 only: validate + normalize the input into schema-conformant primitives, creating no instances.
+     * The same thing for input arriving from outside: every issue in the payload at once, with its paths, instead
+     * of the first one as an exception.
+     *
+     * A valid result carries the instance as its {@see ValidationResult::value()}.
      *
      * @param class-string $className
      */
-    #[\NoDiscard('inspect the CoercionResult; discarding it means the coercion was pointless')]
-    public function coerce(string $className, mixed $input): CoercionResult
+    #[\NoDiscard('inspect the ValidationResult; discarding it drops the mapping outcome')]
+    public static function map(string $className, mixed $input, Normalization $normalization = Normalization::None): ValidationResult
     {
-        return $this->coercer->coerce($this->schemaFor($className), $input);
+        $result = self::schemaFor($className)->validate($input, $normalization);
+        if (!$result->valid) {
+            return $result;
+        }
+        return ValidationResult::valid(Instantiator::build($className, $result->value()));
     }
 
     /**
-     * The way back out: read an instance into schema-conformant primitives, ready for `json_encode()`.
+     * The way back out: an instance read into the primitives its schema describes, ready for `json_encode()`.
      *
-     * Driven by the same Schema that {@see self::map()} maps *into* and that `toJsonSchema()` renders, so the
-     * emitted structure cannot drift away from the advertised schema.
+     * Needs no schema either — the class shape that built the value is the one that reads it back.
      *
-     * @param class-string $className
-     * @throws Serialization\UnextractableValue if the instance does not expose the state the schema describes
+     * @throws UnextractableValue if the instance does not expose the state its constructor names
      */
     #[\NoDiscard('inspect the returned primitives; discarding them means the serialization was pointless')]
-    public function serialize(string $className, mixed $value): mixed
+    public static function serialize(mixed $value): mixed
     {
-        return $this->serializer->serialize($this->schemaFor($className), $value);
+        return Serializer::read($value);
     }
 }
