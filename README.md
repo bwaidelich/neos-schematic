@@ -374,7 +374,7 @@ final readonly class Secret
 
 $caught = null;
 try {
-    (void) Schematic::serialize(new Secret('hunter2'));
+    Schematic::serialize(new Secret('hunter2'));
 } catch (UnextractableValue $exception) {
     $caught = $exception->getMessage();
 }
@@ -502,7 +502,7 @@ final readonly class DateRange implements ProvidesSchema
 
 $caught = null;
 try {
-    (void) Schematic::map(DateRange::class, ['start' => 10, 'end' => 5]);
+    Schematic::map(DateRange::class, ['start' => 10, 'end' => 5]);
 } catch (\InvalidArgumentException $exception) {
     $caught = $exception->getMessage();
 }

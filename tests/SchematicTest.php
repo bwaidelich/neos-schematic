@@ -73,7 +73,8 @@ final class SchematicTest extends TestCase
     public function testTheRefusalReachesEveryEntryPoint(): void
     {
         $this->expectException(SchemaNotProvided::class);
-        (void) Schematic::map(WithoutSchema::class, ['value' => 'anything']);
+        // the result is never produced: the call throws before it can return one
+        $unreached = Schematic::map(WithoutSchema::class, ['value' => 'anything']);
     }
 
     /**

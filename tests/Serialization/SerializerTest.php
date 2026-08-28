@@ -108,7 +108,8 @@ final class SerializerTest extends TestCase
 
         $this->expectException(UnextractableValue::class);
         $this->expectExceptionMessageMatches('/public property "\$secret"/');
-        (void) Schematic::serialize($hidden);
+        // the result is never produced: the call throws before it can return one
+        $unreached = Schematic::serialize($hidden);
     }
 
     public function testACollectionHidingItsItemsFailsLoudly(): void
@@ -117,7 +118,8 @@ final class SerializerTest extends TestCase
 
         $this->expectException(UnextractableValue::class);
         $this->expectExceptionMessageMatches('/IteratorAggregate/');
-        (void) Schematic::serialize($tags);
+        // the result is never produced: the call throws before it can return one
+        $unreached = Schematic::serialize($tags);
     }
 
     public function testPrimitivesPassThrough(): void
