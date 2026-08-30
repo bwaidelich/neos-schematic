@@ -4,16 +4,10 @@ declare(strict_types=1);
 
 namespace Neos\Schematic\Serialization;
 
-use Neos\JsonSchema\AnyOfSchema;
+use Neos\JsonSchema\AnySchema;
 use Neos\JsonSchema\ArraySchema;
-use Neos\JsonSchema\BooleanSchema;
-use Neos\JsonSchema\IntegerSchema;
-use Neos\JsonSchema\NullSchema;
-use Neos\JsonSchema\NumberSchema;
 use Neos\JsonSchema\ObjectSchema;
-use Neos\JsonSchema\OneOfSchema;
 use Neos\JsonSchema\Schema;
-use Neos\JsonSchema\StringSchema;
 use Neos\Schematic\Reflection\ClassShape;
 use Neos\Schematic\Reflection\Nature;
 use Neos\Schematic\Schematic;
@@ -47,7 +41,6 @@ final class Serializer
 
     public static function read(mixed $value, Schema|null $schema = null): mixed
     {
-        $schema = self::substantive($schema);
         if (is_array($value)) {
             $items = $schema instanceof ArraySchema ? $schema->itemSchema(0) : null;
             return array_map(
@@ -62,7 +55,7 @@ final class Serializer
             return $value;
         }
         $shape = ClassShape::of($value::class);
-        return match (self::natureOf($schema) ?? $shape->nature) {
+        return match (self::natureOf($schema, $shape, $value::class)) {
             // an enum is handled above, before any reflection
             Nature::Enum => throw new \LogicException(sprintf('"%s" is not an enum instance', $value::class), 1783600501),
             Nature::Scalar => self::readScalar($value, $shape, $schema),
@@ -72,48 +65,28 @@ final class Serializer
     }
 
     /**
-     * What kind of thing the schema says this is, or `null` where it does not say.
+     * The kind to read this value as — and the one place the two sources meet, so the rule is written out here
+     * rather than left to a `??`:
      *
-     * The schema is the only place the answer can come from for the one case a constructor cannot express: a
-     * one-member envelope whose member is a builtin scalar (`Success{bool $success}` -> `{"success": true}`) is
-     * written exactly like a scalar-backed value object (`Slug{string $value}` -> `"a-slug"`). It answers the
-     * other three the same way, so there is no second rule to keep in step.
-     *
-     * A composite with no single structural reading - `allOf`, `not`, `$ref` - says nothing, and the class's own
-     * {@see ClassShape} decides, as it always did.
+     * - the schema makes a structural claim: it wins, always. It is the published contract, and it is the only
+     *   one of the two that can tell a one-member envelope from the value it wraps.
+     * - the schema makes *no* claim — there is none, or it is {@see AnySchema} — the class is not overruling
+     *   anything by answering, it is the only source there is.
+     * - the schema makes a claim that has no single structural reading — branches that disagree about their kind,
+     *   an `allOf`, a `$ref`: **an error**. Falling back to the class here would silently pick the loser of a
+     *   real disagreement, which is exactly the bug this whole mechanism exists to prevent.
      */
-    private static function natureOf(Schema|null $schema): Nature|null
+    private static function natureOf(Schema|null $schema, ClassShape $shape, string $className): Nature
     {
-        return match (true) {
-            $schema instanceof ObjectSchema => Nature::Shape,
-            $schema instanceof ArraySchema => Nature::ListOf,
-            $schema instanceof StringSchema,
-            $schema instanceof IntegerSchema,
-            $schema instanceof NumberSchema,
-            $schema instanceof BooleanSchema => Nature::Scalar,
-            default => null,
-        };
-    }
-
-    /**
-     * A union is unwrapped to its one substantive branch, which is the `anyOf: [<something>, {"type": "null"}]`
-     * idiom {@see \Neos\JsonSchema\Nullable} produces - a nullable member is still that member.
-     *
-     * A genuine multi-branch union cannot be resolved from here: picking a branch means validating the value
-     * against it, and the value is still an object at this point. It is left unanswered, and the class decides.
-     */
-    private static function substantive(Schema|null $schema): Schema|null
-    {
-        if (!$schema instanceof AnyOfSchema && !$schema instanceof OneOfSchema) {
-            return $schema;
+        if ($schema === null || $schema instanceof AnySchema) {
+            return $shape->nature;
         }
-        $substantive = [];
-        foreach ($schema as $branch) {
-            if (!$branch instanceof NullSchema) {
-                $substantive[] = $branch;
-            }
-        }
-        return count($substantive) === 1 ? self::substantive($substantive[0]) : $schema;
+        return Nature::of($schema) ?? throw new UnextractableValue(sprintf(
+            'The schema published for "%s" here has no single structural reading — a union whose branches are '
+            . 'different kinds of thing, an "allOf" or a "$ref" — so it cannot say whether the value is an object, '
+            . 'a list or a single value. Publish this member under a schema that says which.',
+            $className,
+        ), 1783600504);
     }
 
     private static function readScalar(object $value, ClassShape $shape, Schema|null $schema): mixed

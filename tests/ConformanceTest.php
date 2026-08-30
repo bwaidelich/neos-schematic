@@ -62,10 +62,13 @@ final class ConformanceTest extends TestCase
         );
     }
 
-    public function testASchemaDescribingAStructureForASingleValueIsReported(): void
+    public function testAStructureSchemaOnASingleParameterClassIsComparedMemberByMember(): void
     {
         self::assertSame(
-            ['the class is a single value, but its schema describes a structure'],
+            [
+                '$name: the constructor names it, the schema has no such property',
+                '"title": the schema publishes it, the constructor names no such parameter',
+            ],
             Conformance::check(StructureForAValue::class),
         );
     }
@@ -84,7 +87,10 @@ final class ConformanceTest extends TestCase
     public function testAnOutputOnlyTypeIsJudgedByWhatItEmits(): void
     {
         self::assertSame(
-            ['the class is a single value, but its schema describes a structure'],
+            [
+                '$reason: the constructor names it, the schema has no such property',
+                '"detail": the schema publishes it, the constructor names no such parameter',
+            ],
             Conformance::check(EmittedOnly::class),
         );
         self::assertSame([], Conformance::checkSerialization(new EmittedOnly('nope')));

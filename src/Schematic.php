@@ -87,11 +87,12 @@ final class Schematic
      */
     public static function instantiate(string $className, mixed $input, Normalization $normalization = Normalization::None): object
     {
-        $result = self::schemaFor($className)->validate($input, $normalization);
+        $schema = self::schemaFor($className);
+        $result = $schema->validate($input, $normalization);
         if (!$result->valid) {
             throw CoercionFailed::forClass($className, $result->issues);
         }
-        return Instantiator::build($className, $result->value());
+        return Instantiator::build($className, $result->value(), $schema);
     }
 
     /**
@@ -105,11 +106,12 @@ final class Schematic
     #[\NoDiscard('inspect the ValidationResult; discarding it drops the mapping outcome')]
     public static function map(string $className, mixed $input, Normalization $normalization = Normalization::None): ValidationResult
     {
-        $result = self::schemaFor($className)->validate($input, $normalization);
+        $schema = self::schemaFor($className);
+        $result = $schema->validate($input, $normalization);
         if (!$result->valid) {
             return $result;
         }
-        return ValidationResult::valid(Instantiator::build($className, $result->value()));
+        return ValidationResult::valid(Instantiator::build($className, $result->value(), $schema));
     }
 
     /**

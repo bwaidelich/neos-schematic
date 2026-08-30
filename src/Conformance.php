@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Neos\Schematic;
 
+use Neos\JsonSchema\AnySchema;
 use Neos\JsonSchema\ArraySchema;
+use Neos\JsonSchema\Nullable;
 use Neos\JsonSchema\ObjectSchema;
 use Neos\JsonSchema\Schema;
 use Neos\Schematic\Reflection\ClassShape;
@@ -39,7 +41,13 @@ final class Conformance
      *
      * The question is **"can this class be built from what its schema accepts, and does it publish what it
      * takes?"** — so it is asked of the constructor, and it is the right question only for a type that arrives
-     * from outside. A type that is only ever *emitted* — a schema published for documentation, a hand-written
+     * from outside.
+     *
+     * It compares the class against the reading the *engine* takes of it, not against an independent one: the
+     * schema decides what kind of thing a class is and {@see ClassShape} answers only where the schema has no
+     * single structural reading. So a one-member envelope publishing `type: object` is not a finding — that is
+     * how an envelope is written and how both directions read it — while its members are still compared one by
+     * one, which is where a hand-written schema actually drifts from its class. A type that is only ever *emitted* — a schema published for documentation, a hand-written
      * `jsonSerialize()`, nothing ever mapping a payload onto it — answers it meaninglessly, and is held to
      * {@see self::checkSerialization()} instead.
      *
@@ -49,9 +57,21 @@ final class Conformance
      */
     public static function check(string $className): array
     {
-        $schema = Schematic::schemaFor($className);
+        $schema = Nullable::unwrap(Schematic::schemaFor($className));
         $shape = ClassShape::of($className);
-        return match ($shape->nature) {
+        if ($shape->nature === Nature::Enum) {
+            return self::enum($className, $schema);
+        }
+        // the reading the ENGINE takes, not an independent one, so what is compared below is the class against
+        // the way it is actually built — see Serializer::natureOf() for the rule. A schema whose claim has no
+        // single structural reading is reported rather than thrown: this is the diagnostic, and "the engine will
+        // refuse this" is exactly what a caller asked to be told.
+        $nature = $schema instanceof AnySchema ? $shape->nature : Nature::of($schema);
+        if ($nature === null) {
+            return ['the schema has no single structural reading, so nothing can be built from it or read back '
+                . 'through it — a union whose branches are different kinds of thing, an "allOf" or a "$ref"'];
+        }
+        return match ($nature) {
             Nature::Enum => self::enum($className, $schema),
             Nature::Scalar => self::scalar($shape, $schema),
             Nature::ListOf => self::listOf($shape, $schema),
@@ -112,9 +132,8 @@ final class Conformance
      */
     private static function scalar(ClassShape $shape, Schema $schema): array
     {
-        if ($schema instanceof ObjectSchema || $schema instanceof ArraySchema) {
-            // the class is one value; the schema describes a structure, so nothing about the two lines up
-            return ['the class is a single value, but its schema describes a structure'];
+        if ($shape->parameters === []) {
+            return ['the schema describes a single value, but the class has no constructor parameter to hold one'];
         }
         return self::parameter($shape->parameters[0], $schema, required: true);
     }
@@ -126,6 +145,9 @@ final class Conformance
     {
         if (!$schema instanceof ArraySchema || !$schema->items instanceof Schema) {
             return ['the class is a collection, but its schema is not an array schema with items'];
+        }
+        if ($shape->parameters === []) {
+            return ['the schema describes a list, but the class has no constructor parameter to hold its items'];
         }
         return self::parameter($shape->parameters[0], $schema->items, required: true);
     }

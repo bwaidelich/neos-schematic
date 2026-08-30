@@ -4,16 +4,15 @@ declare(strict_types=1);
 
 namespace Neos\Schematic\Instantiation;
 
+use Neos\JsonSchema\AnySchema;
+use Neos\JsonSchema\Schema;
 use Neos\Schematic\Reflection\ClassShape;
 use Neos\Schematic\Reflection\Nature;
 use Neos\Schematic\Schematic;
 
 /**
- * Builds an instance from **already validated** primitives — no schema involved.
- *
- * After validation the value already *is* schema-conformant, so nothing is left to check: what remains is the
- * class's own shape, which {@see ClassShape} reads. Every branch below is therefore a statement about PHP, not
- * about JSON Schema.
+ * Builds an instance from **already validated** primitives — the schema is still needed, but only to say what
+ * kind of thing the class is.
  *
  * **The constructor is the way in, whatever its visibility.** A class opts into being built by implementing
  * `ProvidesSchema`; from there its `__construct()` is called with the primitives its parameters name — a public
@@ -41,9 +40,10 @@ final class Instantiator
      * @param class-string<T> $className
      * @return T
      */
-    public static function build(string $className, mixed $value): object
+    public static function build(string $className, mixed $value, Schema|null $schema = null): object
     {
         $shape = ClassShape::of($className);
+        // an enum is one whatever a schema says; only the other three are open to question
         if ($shape->nature === Nature::Enum) {
             $case = self::enumCase($className, $value);
             // a case of the enum that was asked for, which is what makes it the T the caller named
@@ -51,9 +51,18 @@ final class Instantiator
                 ? $case
                 : throw new \LogicException(sprintf('"%s" resolved to a case of %s', $className, $case::class), 1783600410);
         }
-        $arguments = self::arguments($shape->nature, $shape->parameters, $value, $className);
+        // the same rule the way back out uses — see Serializer::natureOf() for why each arm is what it is
+        $nature = $schema === null || $schema instanceof AnySchema
+            ? $shape->nature
+            : Nature::of($schema) ?? throw new \LogicException(sprintf(
+                'The schema published for "%s" has no single structural reading — a union whose branches are '
+                . 'different kinds of thing, an "allOf" or a "$ref" — so it cannot say what to build from these '
+                . 'primitives. Publish the type under a schema that says which.',
+                $className,
+            ), 1783600412);
+        $arguments = self::arguments($nature, $shape->parameters, $value, $className, $schema);
         // named arguments for a shape, so declaration order stops mattering; positional for the rest
-        $positional = $shape->nature === Nature::Shape ? $arguments : array_values($arguments);
+        $positional = $nature === Nature::Shape ? $arguments : array_values($arguments);
         /** @var \ReflectionClass<T> $reflectionClass */
         $reflectionClass = new \ReflectionClass($className);
         $constructor = $reflectionClass->getConstructor();
@@ -75,9 +84,12 @@ final class Instantiator
      * @param class-string $className
      * @return array<string, mixed>
      */
-    private static function arguments(Nature $nature, array $parameters, mixed $value, string $className): array
+    private static function arguments(Nature $nature, array $parameters, mixed $value, string $className, Schema|null $schema): array
     {
         if ($nature === Nature::Scalar) {
+            if ($parameters === []) {
+                throw new \LogicException(sprintf('Expected "%s" to have a constructor parameter to hold a single value', $className), 1783600411);
+            }
             return ['value' => $value];
         }
         if ($nature === Nature::ListOf) {

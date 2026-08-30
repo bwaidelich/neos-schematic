@@ -241,8 +241,9 @@ collection semantics makes its parameter variadic.
 
 One case the constructor cannot settle: a **one-member envelope whose member is a scalar**.
 `Success{bool $success}` meaning `{"success": true}` is written exactly like `Slug{string $value}` meaning
-`"a-slug"`. The table above reads both as Scalar — so for that one question, the **schema decides**, since the
-class already publishes one and it says `type: object` where the value object says `type: string`:
+`"a-slug"`. The table above reads both as Scalar — so for that one question the **schema decides**, in both
+directions, since the class already publishes one and it says `type: object` where the value object says
+`type: string`:
 
 ```php
 use Neos\JsonSchema\BooleanSchema;
