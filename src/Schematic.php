@@ -7,9 +7,9 @@ namespace Neos\Schematic;
 use Neos\JsonSchema\ProvidesSchema;
 use Neos\JsonSchema\Schema;
 use Neos\JsonSchema\Validation\Normalization;
+use Neos\JsonSchema\Validation\Projection;
 use Neos\JsonSchema\Validation\ValidationResult;
 use Neos\Schematic\Instantiation\Instantiator;
-use Neos\Schematic\Serialization\Projection;
 use Neos\Schematic\Serialization\Serializer;
 
 /**
@@ -119,13 +119,13 @@ final class Schematic
      * shape drives *extraction* — it alone knows an enum's backing value, a scalar value object's single member,
      * a collection's `Traversable` — but PHP's one `array` type covers two JSON types, so the class cannot say
      * whether `[]` is an empty list or an empty map. Only the schema can, which is how validation already reads
-     * `[]` on the way in. See {@see Serialization\Projection}.
+     * `[]` on the way in — the same {@see Projection} answers both directions.
      *
      * @throws UnextractableValue if the instance does not expose the state its constructor names
      */
     #[\NoDiscard('inspect the returned primitives; discarding them means the serialization was pointless')]
     public static function serialize(Schema $schema, mixed $value): mixed
     {
-        return Projection::apply($schema, Serializer::read($value));
+        return Projection::outbound($schema, Serializer::read($value));
     }
 }

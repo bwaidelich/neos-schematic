@@ -15,7 +15,8 @@ use Neos\Schematic\UnextractableValue;
  *
  * **Extraction only.** What comes out here is what the class holds, which is not yet what the document describes:
  * PHP's one `array` type covers both of JSON's structures, so an empty map and an empty list are indistinguishable
- * at this point. {@see Projection} is the second pass that tells them apart from the schema.
+ * at this point. {@see \Neos\JsonSchema\Validation\Projection::outbound()} is the second pass that tells them
+ * apart from the schema.
  *
  * **Public properties only.** Construction reaches a private constructor through a closure the class hands over
  * deliberately; going out, the equivalent is a class exposing its state, or writing a `jsonSerialize()` of its

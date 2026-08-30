@@ -358,8 +358,8 @@ assert(Schematic::instantiate(Rating::class, '5', normalization: Normalization::
 `map()`. The class shape drives *extraction* — only the class knows an enum's backing value, a value object's single
 member, a collection's `Traversable`. But PHP has one `array` type where JSON has two, so the class cannot say
 whether `[]` was an empty list or an empty map, and a schema-free serializer emits `[]` for both — including where
-the very schema it published says the member is an object. The schema is the only thing that can answer, which is
-exactly how validation already reads `[]` on the way *in*:
+the very schema it published says the member is an object. The schema is the only thing that can answer, and it is
+the same walk **neos/jsonschema** already runs when it reads a value *in* (`Projection`, outbound this time):
 
 ```php
 use Neos\JsonSchema\ArraySchema;
