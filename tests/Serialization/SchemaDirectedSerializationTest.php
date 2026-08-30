@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Neos\Schematic\Tests\Serialization;
 
 use Neos\Schematic\Schematic;
+use Neos\Schematic\Tests\Fixtures\Acknowledgement;
 use Neos\Schematic\Tests\Fixtures\Registry;
 use Neos\Schematic\Tests\Fixtures\Reversed;
+use Neos\Schematic\Tests\Fixtures\Slug;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
@@ -40,6 +42,21 @@ final class SchemaDirectedSerializationTest extends TestCase
         $registry = Schematic::map(Registry::class, $payload)->value();
 
         self::assertSame($payload, Schematic::serialize(Registry::schema(), $registry));
+    }
+
+    /**
+     * The other thing a class cannot say about itself: `Acknowledgement{bool $acknowledged}` and
+     * `Slug{string $value}` have the same shape of constructor and opposite intent, so reading both off the
+     * constructor makes both a single value and only the second one right. The schema says which is which -
+     * `type: object` against `type: string` - and is consulted before the class shape for exactly this reason.
+     */
+    public function testTheSchemaTellsAnEnvelopeFromAValueObject(): void
+    {
+        self::assertSame(
+            ['acknowledged' => true],
+            Schematic::serialize(Acknowledgement::schema(), new Acknowledgement()),
+        );
+        self::assertSame('a-slug', Schematic::serialize(Slug::schema(), Slug::fromString('a-slug')));
     }
 
     /**

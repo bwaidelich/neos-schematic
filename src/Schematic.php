@@ -126,6 +126,6 @@ final class Schematic
     #[\NoDiscard('inspect the returned primitives; discarding them means the serialization was pointless')]
     public static function serialize(Schema $schema, mixed $value): mixed
     {
-        return Projection::outbound($schema, Serializer::read($value));
+        return Projection::outbound($schema, Serializer::read($value, $schema));
     }
 }

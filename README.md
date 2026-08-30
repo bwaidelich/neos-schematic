@@ -239,45 +239,33 @@ Unambiguous by construction: `Slug{string $value}` is a Scalar, `Tags{Tag ...$ta
 `Point{array $coords}` a Shape expecting `['coords' => …]`, and `Wrapper{Inner $inner}` a Shape. A value object wanting
 collection semantics makes its parameter variadic.
 
+One case the constructor cannot settle: a **one-member envelope whose member is a scalar**.
+`Success{bool $success}` meaning `{"success": true}` is written exactly like `Slug{string $value}` meaning
+`"a-slug"`. The table above reads both as Scalar — so for that one question, the **schema decides**, since the
+class already publishes one and it says `type: object` where the value object says `type: string`:
+
 ```php
+use Neos\JsonSchema\BooleanSchema;
+use Neos\JsonSchema\ObjectSchema;
 use Neos\JsonSchema\ProvidesSchema;
 use Neos\JsonSchema\Schema;
-use Neos\Schematic\Discovery\AutoDiscoveringSchema;
-use Neos\Schematic\Reflection\ClassShape;
-use Neos\Schematic\Reflection\Nature;
+use Neos\JsonSchema\Support\ObjectProperties;
 use Neos\Schematic\Schematic;
 
-final readonly class Tag implements ProvidesSchema
+final readonly class Success implements ProvidesSchema
 {
-    public function __construct(public string $value) {}
+    public function __construct(public bool $success = true) {}
 
     public static function schema(): Schema
     {
-        return AutoDiscoveringSchema::analyze(self::class);
+        return ObjectSchema::create(
+            properties: ObjectProperties::create(success: BooleanSchema::create(const: true)),
+            required: ['success'],
+        );
     }
 }
 
-final readonly class Tags implements ProvidesSchema
-{
-    /** @var list<Tag> */
-    public array $tags;
-
-    public function __construct(Tag ...$tags)
-    {
-        $this->tags = array_values($tags);
-    }
-
-    public static function schema(): Schema
-    {
-        return AutoDiscoveringSchema::analyze(self::class);
-    }
-}
-
-assert(ClassShape::of(Tag::class)->nature === Nature::Scalar);
-assert(ClassShape::of(Tags::class)->nature === Nature::ListOf);
-
-$tags = Schematic::instantiate(Tags::class, ['php', 'json']);
-assert(Schematic::serialize(Tags::schema(), $tags) === ['php', 'json']);
+assert(Schematic::serialize(Success::schema(), new Success()) === ['success' => true]);
 ```
 
 ## Deriving a schema from the class

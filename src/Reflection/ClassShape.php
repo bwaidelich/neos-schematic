@@ -5,10 +5,15 @@ declare(strict_types=1);
 namespace Neos\Schematic\Reflection;
 
 /**
- * The one reading of a class the engine needs: its {@see Nature}, and the constructor parameters that make it up.
+ * A reading of a class taken from the class alone: its {@see Nature}, and the constructor parameters that make it
+ * up. Read once and passed around.
  *
- * Instantiation and serialization need no schema — after coercion the value already *is* schema-conformant
- * primitives, so all that is left is the class's own shape. This is that shape, read once and passed around.
+ * **Where this is the answer, and where it is a fallback.** It is the whole answer for
+ * {@see \Neos\Schematic\Discovery\AutoDiscoveringSchema}, which derives a schema *from* a class and so has none
+ * to consult, and for {@see \Neos\Schematic\Conformance}, whose job is comparing this reading against the
+ * published one. {@see \Neos\Schematic\Serialization\Serializer} prefers the schema and falls back to this
+ * where the schema has no single structural reading — a multi-branch union, an `allOf`, a `$ref`, or nothing.
+ * {@see \Neos\Schematic\Instantiation\Instantiator} still reads by nature alone.
  *
  * The nature is decided from the class alone, in this order, which makes it unambiguous:
  *
@@ -21,7 +26,10 @@ namespace Neos\Schematic\Reflection;
  *
  * Variadic is checked before scalar, so `Parts{string ...$parts}` is a collection rather than one value; and a
  * class-typed single parameter stays a Shape, because only a builtin scalar arrives as a bare primitive. A value
- * object wanting collection semantics without variadics says so by making the parameter variadic.
+ * object wanting collection semantics without variadics says so by making the parameter variadic, and a
+ * one-member envelope whose member is a scalar is the one case a constructor cannot settle — `Success{bool $success}`
+ * is written exactly like `Slug{string $value}` — so the schema settles that one, in
+ * {@see \Neos\Schematic\Serialization\Serializer}.
  */
 final readonly class ClassShape
 {
