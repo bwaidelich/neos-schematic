@@ -9,6 +9,7 @@ use Neos\JsonSchema\Schema;
 use Neos\JsonSchema\Validation\Normalization;
 use Neos\JsonSchema\Validation\ValidationResult;
 use Neos\Schematic\Instantiation\Instantiator;
+use Neos\Schematic\Serialization\Projection;
 use Neos\Schematic\Serialization\Serializer;
 
 /**
@@ -114,13 +115,17 @@ final class Schematic
     /**
      * The way back out: an instance read into the primitives its schema describes, ready for `json_encode()`.
      *
-     * Needs no schema either — the class shape that built the value is the one that reads it back.
+     * **The schema is required**, and it is what makes this the exact inverse of {@see self::map()}. The class
+     * shape drives *extraction* — it alone knows an enum's backing value, a scalar value object's single member,
+     * a collection's `Traversable` — but PHP's one `array` type covers two JSON types, so the class cannot say
+     * whether `[]` is an empty list or an empty map. Only the schema can, which is how validation already reads
+     * `[]` on the way in. See {@see Serialization\Projection}.
      *
      * @throws UnextractableValue if the instance does not expose the state its constructor names
      */
     #[\NoDiscard('inspect the returned primitives; discarding them means the serialization was pointless')]
-    public static function serialize(mixed $value): mixed
+    public static function serialize(Schema $schema, mixed $value): mixed
     {
-        return Serializer::read($value);
+        return Projection::apply($schema, Serializer::read($value));
     }
 }

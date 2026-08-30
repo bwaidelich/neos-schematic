@@ -51,7 +51,7 @@ final readonly class Post implements \JsonSerializable, ProvidesSchema
 
     public function jsonSerialize(): mixed
     {
-        return Schematic::serialize($this);
+        return Schematic::serialize(self::schema(), $this);
     }
 
     public static function schema(): Schema
@@ -117,7 +117,7 @@ difference is that it asked. From there analysis recurses into nested types on i
 | `Schematic::schemaFor($class)`                                         | the class's own `schema()` — an error if it has none |
 | `Schematic::instantiate($class, $input, $normalization?)`              | validate, then build — **throws** `CoercionFailed`   |
 | `Schematic::map($class, $input, $normalization?)`                      | validate, then build — returns a `ValidationResult`  |
-| `Schematic::serialize($value)`                                         | read an instance back into primitives                |
+| `Schematic::serialize($schema, $value)`                                | read an instance back into primitives                |
 
 `instantiate()` throws because it is what a named constructor calls: there is no half-built value object to hand back.
 `map()` is for a payload arriving from outside, where every issue in it is wanted at once.
@@ -277,7 +277,7 @@ assert(ClassShape::of(Tag::class)->nature === Nature::Scalar);
 assert(ClassShape::of(Tags::class)->nature === Nature::ListOf);
 
 $tags = Schematic::instantiate(Tags::class, ['php', 'json']);
-assert(Schematic::serialize($tags) === ['php', 'json']);
+assert(Schematic::serialize(Tags::schema(), $tags) === ['php', 'json']);
 ```
 
 ## Deriving a schema from the class
@@ -354,11 +354,65 @@ assert(Schematic::instantiate(Rating::class, '5', normalization: Normalization::
 
 ## Serializing back out
 
-`Schematic::serialize()` reads **public properties only**. Going in, a class exposes itself to the engine by owning a
-schema, and its constructor names exactly what it takes; going out, there is no such statement — a property is either
-public or it is not. So a class with private state exposes it, or writes a `jsonSerialize()` of its own:
+`Schematic::serialize()` takes **the schema as well as the value**, and that is what makes it the exact inverse of
+`map()`. The class shape drives *extraction* — only the class knows an enum's backing value, a value object's single
+member, a collection's `Traversable`. But PHP has one `array` type where JSON has two, so the class cannot say
+whether `[]` was an empty list or an empty map, and a schema-free serializer emits `[]` for both — including where
+the very schema it published says the member is an object. The schema is the only thing that can answer, which is
+exactly how validation already reads `[]` on the way *in*:
 
 ```php
+use Neos\JsonSchema\ArraySchema;
+use Neos\JsonSchema\ObjectSchema;
+use Neos\JsonSchema\ProvidesSchema;
+use Neos\JsonSchema\Schema;
+use Neos\JsonSchema\StringSchema;
+use Neos\JsonSchema\Support\ObjectProperties;
+use Neos\Schematic\Schematic;
+
+final readonly class Registry implements ProvidesSchema
+{
+    /**
+     * @param array<string, mixed> $entries
+     * @param list<string> $names
+     */
+    public function __construct(public array $entries, public array $names) {}
+
+    public static function schema(): Schema
+    {
+        static $schema = null;
+        return $schema ??= ObjectSchema::create(
+            properties: ObjectProperties::create(
+                entries: ObjectSchema::create(additionalProperties: true),
+                names: ArraySchema::create(items: StringSchema::create()),
+            ),
+            required: ['entries', 'names'],
+        );
+    }
+}
+
+$registry = Schematic::map(Registry::class, ['entries' => new \stdClass(), 'names' => []])->value();
+
+// the empty map is a map and the empty list is a list, because the schema says which is which
+assert(json_encode(Schematic::serialize(Registry::schema(), $registry)) === '{"entries":{},"names":[]}');
+```
+
+There is deliberately no overload deriving the schema from `$value::class`. A consumer may be serializing through a
+*declared* type rather than the runtime class — an API describing its 200 response by the return type its document
+publishes — and reaching for the runtime class behind its back would quietly undo that. Where the runtime class *is*
+the right answer, it is one line: `Schematic::serialize(Schematic::schemaFor($value::class), $value)`.
+
+Members the schema does not name are handed back untouched: a free-form map's values are described by nothing, so
+there is nothing there to shape and guessing would be the mistake this avoids. Members it does name go out in the
+order it names them, and keys it does not publish follow — a class emitting what its document does not describe is
+a disagreement for `Conformance` to report, not one to hide by dropping.
+
+Extraction reads **public properties only**. Going in, a class exposes itself to the engine by owning a schema, and
+its constructor names exactly what it takes; going out, there is no such statement — a property is either public or
+it is not. So a class with private state exposes it, or writes a `jsonSerialize()` of its own:
+
+```php
+use Neos\JsonSchema\StringSchema;
 use Neos\Schematic\Schematic;
 use Neos\Schematic\UnextractableValue;
 
@@ -374,7 +428,7 @@ final readonly class Secret
 
 $caught = null;
 try {
-    Schematic::serialize(new Secret('hunter2'));
+    Schematic::serialize(StringSchema::create(), new Secret('hunter2'));
 } catch (UnextractableValue $exception) {
     $caught = $exception->getMessage();
 }
@@ -386,7 +440,7 @@ A class that wants `json_encode($post)` to emit exactly what its schema describe
 ```php (no test)
 public function jsonSerialize(): mixed
 {
-    return Schematic::serialize($this);
+    return Schematic::serialize(self::schema(), $this);
 }
 ```
 

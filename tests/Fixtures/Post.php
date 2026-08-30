@@ -26,7 +26,7 @@ final readonly class Post implements JsonSerializable, ProvidesSchema
 
     public function jsonSerialize(): mixed
     {
-        return Schematic::serialize($this);
+        return Schematic::serialize(self::schema(), $this);
     }
 
     public static function schema(): Schema

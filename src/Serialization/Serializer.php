@@ -13,6 +13,10 @@ use Neos\Schematic\UnextractableValue;
  * Reads an instance back into primitives — the mirror of {@see \Neos\Schematic\Instantiation\Instantiator}, and
  * like it driven by the class alone.
  *
+ * **Extraction only.** What comes out here is what the class holds, which is not yet what the document describes:
+ * PHP's one `array` type covers both of JSON's structures, so an empty map and an empty list are indistinguishable
+ * at this point. {@see Projection} is the second pass that tells them apart from the schema.
+ *
  * **Public properties only.** Construction reaches a private constructor through a closure the class hands over
  * deliberately; going out, the equivalent is a class exposing its state, or writing a `jsonSerialize()` of its
  * own. Reflecting past `private` would be the engine deciding a boundary the class drew does not apply to it.

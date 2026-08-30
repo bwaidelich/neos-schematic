@@ -70,11 +70,14 @@ final class Conformance
      */
     public static function checkSerialization(object $instance): array
     {
+        // The runtime class is the right schema here, and the explicit one: this asks what *this instance*
+        // emits, not what some declared type it is passed as would.
+        $schema = Schematic::schemaFor($instance::class);
         // What the class actually puts on the wire, which is not always what Schematic::serialize() reads: a
         // class with a jsonSerialize() of its own emits *that*, and it is the emitted form the schema describes.
-        $primitives = $instance instanceof \JsonSerializable ? $instance : Schematic::serialize($instance);
+        $primitives = $instance instanceof \JsonSerializable ? $instance : Schematic::serialize($schema, $instance);
         $encoded = json_decode((string) json_encode($primitives), true);
-        $result = Schematic::schemaFor($instance::class)->validate($encoded);
+        $result = $schema->validate($encoded);
         return $result->valid ? [] : array_map(
             static fn(\Neos\JsonSchema\Validation\Issue $issue): string => sprintf(
                 'serialized to something its own schema rejects at "%s": %s',
