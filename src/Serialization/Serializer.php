@@ -11,6 +11,7 @@ use Neos\JsonSchema\ObjectSchema;
 use Neos\JsonSchema\OneOfSchema;
 use Neos\JsonSchema\ProvidesSchema;
 use Neos\JsonSchema\Schema;
+use Neos\JsonSchema\Support\ObjectProperties;
 use Neos\Schematic\Reflection\ClassShape;
 use Neos\Schematic\Reflection\Nature;
 use Neos\Schematic\Schematic;
@@ -25,8 +26,8 @@ use Neos\Schematic\UnextractableValue;
  * holding it. The schema can, and it is the only thing that can, which is why an empty array is emitted as `{}`
  * exactly where the schema being read against calls it an object. That is the *whole* of what the schema decides
  * out here: key order is nothing JSON defines, and a key the class emits is a key the document gets, whether or
- * not the schema names it — a disagreement for {@see \Neos\Schematic\Conformance} to report rather than one to
- * hide by dropping.
+ * not the schema names it — though a class and its schema disagreeing about *which* members exist is caught here
+ * and raised, since nothing downstream would ever notice.
  *
  * **The schema says which kind of thing a class is; reflection says where to find it.** `Success{bool $success}`
  * publishing `type: object` is an envelope, `Slug{string $value}` publishing `type: string` is a value object,
@@ -216,11 +217,22 @@ final class Serializer
     }
 
     /**
+     * The one place the class and the schema it publishes are both in hand, so it is the one place their
+     * *disagreement* can be caught — and it is caught rather than emitted.
+     *
+     * Nothing downstream would notice: a member the document never described goes out as an extra field, and one
+     * the document promised is simply missing from the body. Both are bugs in the API rather than in the request,
+     * and both are silent — the reason to raise them here, where they are free to see, is that there is no later
+     * point at which anything compares the two.
+     *
      * @return array<string, mixed>|\stdClass
      */
     private static function readShape(object $value, ClassShape $shape, Schema|null $schema = null): array|\stdClass
     {
         $properties = $schema instanceof ObjectSchema ? $schema->properties : null;
+        if ($properties !== null) {
+            self::agreeOnMembers($value::class, $shape, $properties);
+        }
         $result = [];
         foreach ($shape->parameters as $parameter) {
             $name = $parameter->getName();
@@ -228,6 +240,36 @@ final class Serializer
         }
         // a class holding no state at all is still an object, and `[]` would go out as a list
         return $result === [] ? new \stdClass() : $result;
+    }
+
+    /**
+     * The members the class emits are the members its schema publishes — checked by name, in both directions,
+     * which is all a schema and a constructor can be compared on without judging a value.
+     *
+     * @param class-string $className
+     */
+    private static function agreeOnMembers(string $className, ClassShape $shape, ObjectProperties $properties): void
+    {
+        foreach ($shape->parameters as $parameter) {
+            if ($properties->get($parameter->getName()) === null) {
+                throw new UnextractableValue(sprintf(
+                    '"%s" would emit "$%s", which the schema it publishes does not describe — add the property to '
+                    . 'the schema, or stop emitting it',
+                    $className,
+                    $parameter->getName(),
+                ), 1783600505);
+            }
+        }
+        foreach ($properties->names() as $name) {
+            if ($shape->parameter($name) === null) {
+                throw new UnextractableValue(sprintf(
+                    '"%s" publishes a property "%s" its constructor names nowhere, so nothing will ever emit it — '
+                    . 'remove it from the schema, or take it as a constructor parameter',
+                    $className,
+                    $name,
+                ), 1783600506);
+            }
+        }
     }
 
     /**

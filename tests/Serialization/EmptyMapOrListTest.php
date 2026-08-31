@@ -58,8 +58,9 @@ final class EmptyMapOrListTest extends TestCase
     }
 
     /**
-     * A key the class emits is a key the document gets, even where the schema forbids it: dropping it would hide a
-     * disagreement that `Conformance` exists to report.
+     * A key the schema does not name is kept, even where it forbids one: dropping it would hide a disagreement
+     * rather than let it be seen. (A *class* whose members disagree with its schema does not get this far — the
+     * serializer raises that while reading the instance.)
      */
     public function testUndeclaredKeysAreKept(): void
     {

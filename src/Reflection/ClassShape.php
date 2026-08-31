@@ -10,7 +10,7 @@ namespace Neos\Schematic\Reflection;
  *
  * **Where this is the answer, and where it is a fallback.** It is the whole answer for
  * {@see \Neos\Schematic\Discovery\AutoDiscoveringSchema}, which derives a schema *from* a class and so has none
- * to consult, and for {@see \Neos\Schematic\Conformance}, whose job is comparing this reading against the
+ * to consult, and for {@see \Neos\Schematic\Serialization\Serializer}, which compares this reading against the
  * published one. {@see \Neos\Schematic\Serialization\Serializer} prefers the schema and falls back to this
  * where the schema has no single structural reading — a multi-branch union, an `allOf`, a `$ref`, or nothing.
  * {@see \Neos\Schematic\Instantiation\Instantiator} still reads by nature alone.
