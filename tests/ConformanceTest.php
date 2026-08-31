@@ -11,6 +11,7 @@ use Neos\Schematic\Tests\Fixtures\Drift\NullWidened;
 use Neos\Schematic\Tests\Fixtures\Drift\OptionalRequired;
 use Neos\Schematic\Tests\Fixtures\Drift\PublishedButUnbuilt;
 use Neos\Schematic\Tests\Fixtures\Drift\StructureForAValue;
+use Neos\Schematic\Tests\Fixtures\Either;
 use Neos\Schematic\Tests\Fixtures\Post;
 use Neos\Schematic\Tests\Fixtures\Rating;
 use Neos\Schematic\Tests\Fixtures\Slug;
@@ -44,6 +45,15 @@ final class ConformanceTest extends TestCase
     public function testAHandWrittenSchemaCanAgreeToo(): void
     {
         self::assertSame([], Conformance::check(Slug::class));
+    }
+
+    /**
+     * A union member is comparable in the one respect a union has — whether it may be absent. Which branch a
+     * value turns out to be is decided from the value, and each branch's own schema answers for itself.
+     */
+    public function testAUnionMemberIsHeldToWhatAUnionCanBeHeldTo(): void
+    {
+        self::assertSame([], Conformance::check(Either::class));
     }
 
     public function testASchemaAcceptingANullTheConstructorRefusesIsReported(): void

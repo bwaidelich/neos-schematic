@@ -9,6 +9,7 @@ use Neos\JsonSchema\OneOfSchema;
 use Neos\JsonSchema\StringSchema;
 use Neos\Schematic\Schematic;
 use Neos\Schematic\Tests\Fixtures\Acknowledgement;
+use Neos\Schematic\Tests\Fixtures\Either;
 use Neos\Schematic\Tests\Fixtures\Registry;
 use Neos\Schematic\Tests\Fixtures\Reversed;
 use Neos\Schematic\Tests\Fixtures\Slug;
@@ -107,6 +108,33 @@ final class SchemaDirectedSerializationTest extends TestCase
     public function testAnUnconstrainedSchemaLeavesTheReadingToTheClass(): void
     {
         self::assertSame('a-slug', Schematic::serialize(AnySchema::create(), Slug::fromString('a-slug')));
+    }
+
+    /**
+     * A union member is read under the branch the value *is*, which is the only thing that can say so — and the
+     * branch is what carries the constraints, so the empty map inside it still goes out as `{}` rather than `[]`.
+     * The union itself has no properties to read anything from.
+     */
+    public function testAUnionMemberIsReadUnderTheBranchTheValueIs(): void
+    {
+        $either = new Either(new Registry([], []));
+
+        self::assertSame('{"held":{"entries":{},"names":[]}}', json_encode(Schematic::serialize(Either::schema(), $either)));
+    }
+
+    /**
+     * And the way in picks the same branch, from the primitives: the published `anyOf` says which shapes may
+     * arrive, and the first branch that accepts a payload is the one it gets built as.
+     */
+    public function testAUnionMemberIsBuiltAsTheBranchItsPrimitivesMatch(): void
+    {
+        $registry = Schematic::map(Either::class, ['held' => ['entries' => new \stdClass(), 'names' => []]])->value();
+        $slug = Schematic::map(Either::class, ['held' => 'a-slug'])->value();
+
+        self::assertInstanceOf(Either::class, $registry);
+        self::assertInstanceOf(Either::class, $slug);
+        self::assertInstanceOf(Registry::class, $registry->held);
+        self::assertInstanceOf(Slug::class, $slug->held);
     }
 
     /**
