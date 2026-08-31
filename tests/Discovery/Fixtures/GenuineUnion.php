@@ -9,5 +9,5 @@ namespace Neos\Schematic\Tests\Discovery\Fixtures;
  */
 final readonly class GenuineUnion
 {
-    public function __construct(public string|int $either) {}
+    public function __construct(public string|int $either, public Slug|Title|null $named = null) {}
 }

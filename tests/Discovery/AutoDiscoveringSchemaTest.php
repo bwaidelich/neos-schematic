@@ -127,11 +127,21 @@ final class AutoDiscoveringSchemaTest extends TestCase
         AutoDiscoveringSchema::analyze(Nothing::class);
     }
 
-    public function testAGenuineUnionIsRejected(): void
+    /**
+     * A member that may be one of several types is an `anyOf` over them — the same reading a union return type
+     * gets in a document. `null` is not one of those types: it is the member being absent, which is what
+     * {@see \Neos\JsonSchema\Nullable} says around the whole union rather than inside it.
+     */
+    public function testAGenuineUnionBecomesAnAnyOfOverItsBranches(): void
     {
-        $this->expectException(UnsupportedTypeException::class);
-        $this->expectExceptionMessageMatches('/only single named types/');
-        AutoDiscoveringSchema::analyze(GenuineUnion::class);
+        // Slug owns its schema and contributes it verbatim, Title has none and is analyzed — a union treats its
+        // branches exactly as any other nested member position does
+        self::assertSame(
+            '{"type":"object","properties":{"either":{"anyOf":[{"type":"string"},{"type":"integer"}]},'
+            . '"named":{"anyOf":[' . json_encode(Slug::schema()) . ',{"type":"string"},{"type":"null"}]}},'
+            . '"additionalProperties":false,"required":["either"]}',
+            json_encode(AutoDiscoveringSchema::analyze(GenuineUnion::class)),
+        );
     }
 
     public function testABuiltinThatIsNotAScalarIsRejected(): void
