@@ -6,9 +6,6 @@ namespace Neos\Schematic;
 
 use Neos\JsonSchema\ProvidesSchema;
 use Neos\JsonSchema\Schema;
-use Neos\JsonSchema\Validation\Normalization;
-use Neos\JsonSchema\Validation\Projection;
-use Neos\JsonSchema\Validation\ValidationResult;
 use Neos\Schematic\Instantiation\Instantiator;
 use Neos\Schematic\Serialization\Serializer;
 
@@ -32,6 +29,8 @@ use Neos\Schematic\Serialization\Serializer;
  *             return $schema ??= StringSchema::create(...);
  *         }
  *     }
+ *
+ * **Input is JSON decoded to associative arrays** – `json_decode($json, true)`.
  *
  * **Validation happens on every path that produces an instance**, which is what makes a value object valid however
  * it was built: {@see self::instantiate()} validates against the class's own schema before constructing, and
@@ -85,33 +84,33 @@ final class Schematic
      * @return T
      * @throws CoercionFailed if the input does not satisfy the class's schema
      */
-    public static function instantiate(string $className, mixed $input, Normalization $normalization = Normalization::None): object
+    public static function instantiate(string $className, mixed $input): object
     {
         $schema = self::schemaFor($className);
-        $result = $schema->validate($input, $normalization);
+        $result = $schema->validate($input);
         if (!$result->valid) {
             throw CoercionFailed::forClass($className, $result->issues);
         }
-        return Instantiator::build($className, $result->value(), $schema);
+        return Instantiator::build($className, $input, $schema);
     }
 
     /**
      * The same thing for input arriving from outside: every issue in the payload at once, with its paths, instead
      * of the first one as an exception.
      *
-     * A valid result carries the instance as its {@see ValidationResult::value()}.
+     * A successful result carries the instance as its {@see MappingResult::value()}.
      *
      * @param class-string $className
      */
-    #[\NoDiscard('inspect the ValidationResult; discarding it drops the mapping outcome')]
-    public static function map(string $className, mixed $input, Normalization $normalization = Normalization::None): ValidationResult
+    #[\NoDiscard('inspect the MappingResult; discarding it drops the mapping outcome')]
+    public static function map(string $className, mixed $input): MappingResult
     {
         $schema = self::schemaFor($className);
-        $result = $schema->validate($input, $normalization);
+        $result = $schema->validate($input);
         if (!$result->valid) {
-            return $result;
+            return MappingResult::failed($result->issues);
         }
-        return ValidationResult::valid(Instantiator::build($className, $result->value(), $schema));
+        return MappingResult::built(Instantiator::build($className, $input, $schema));
     }
 
     /**
@@ -120,14 +119,14 @@ final class Schematic
      * **The schema is required**, and it is what makes this the exact inverse of {@see self::map()}. The class
      * shape drives *extraction* — it alone knows an enum's backing value, a scalar value object's single member,
      * a collection's `Traversable` — but PHP's one `array` type covers two JSON types, so the class cannot say
-     * whether `[]` is an empty list or an empty map. Only the schema can, which is how validation already reads
-     * `[]` on the way in — the same {@see Projection} answers both directions.
+     * whether `[]` is an empty list or an empty map. Only the schema can, and saying so is the one thing it is
+     * consulted for out here — see {@see Serializer}.
      *
      * @throws UnextractableValue if the instance does not expose the state its constructor names
      */
     #[\NoDiscard('inspect the returned primitives; discarding them means the serialization was pointless')]
     public static function serialize(Schema $schema, mixed $value): mixed
     {
-        return Projection::outbound($schema, Serializer::read($value, $schema));
+        return Serializer::read($value, $schema);
     }
 }

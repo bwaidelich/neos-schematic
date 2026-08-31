@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Neos\Schematic\Tests;
 
 use Neos\JsonSchema\Validation\IssueCode;
-use Neos\JsonSchema\Validation\Normalization;
 use Neos\Schematic\CoercionFailed;
 use Neos\Schematic\SchemaNotProvided;
 use Neos\Schematic\Schematic;
@@ -182,7 +181,7 @@ final class SchematicTest extends TestCase
     {
         $result = Schematic::map(Post::class, $this->payload());
 
-        self::assertTrue($result->valid, (string) $result->issues);
+        self::assertTrue($result->success, (string) $result->issues);
         $post = $result->value();
         self::assertInstanceOf(Post::class, $post);
         self::assertSame('hello-world', $post->slug->value);
@@ -223,7 +222,7 @@ final class SchematicTest extends TestCase
     {
         $result = Schematic::map(Post::class, ['slug' => 'Hello World', 'author' => 'Ada', 'status' => 'nope', 'tags' => []]);
 
-        self::assertFalse($result->valid);
+        self::assertFalse($result->success);
         self::assertSame(['slug', 'status'], array_map(static fn($issue): string => $issue->pathAsString(), $result->issues->toArray()));
     }
 
@@ -231,7 +230,7 @@ final class SchematicTest extends TestCase
     {
         $result = Schematic::map(Slug::class, 'Hello World');
 
-        self::assertFalse($result->valid);
+        self::assertFalse($result->success);
         self::assertSame([IssueCode::InvalidPattern->value], $result->issues->codes());
     }
 
@@ -254,12 +253,24 @@ final class SchematicTest extends TestCase
     }
 
     /**
-     * A path or query parameter is always a string, so its binding site opts into scalar normalization; a JSON
-     * body does not, and `"5"` stays a string there.
+     * A value is judged exactly as it arrives: `"5"` is a string, and a string is not a case of an integer-backed
+     * enum. Reading a parameter that is *always* a string leniently is the binding layer's business — see
+     * `Neos\OpenApi\Binding\ScalarNormalizer` — and it happens before the value gets here.
      */
-    public function testNormalizationIsChosenPerCallSite(): void
+    public function testAValueIsJudgedExactlyAsItArrives(): void
     {
-        self::assertSame(Rating::high, Schematic::instantiate(Rating::class, '5', normalization: Normalization::Scalars));
-        self::assertFalse(Schematic::map(Rating::class, '5')->valid);
+        self::assertSame(Rating::high, Schematic::instantiate(Rating::class, 5));
+        self::assertFalse(Schematic::map(Rating::class, '5')->success);
+    }
+
+    /**
+     * One input shape, so that a payload that validates is one that builds: JSON decoded to associative arrays.
+     */
+    public function testAStdClassPayloadIsReportedRatherThanUnwrapped(): void
+    {
+        $result = Schematic::map(Post::class, (object) $this->payload());
+
+        self::assertFalse($result->success);
+        self::assertSame([IssueCode::InvalidType->value], $result->issues->codes());
     }
 }

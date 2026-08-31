@@ -31,12 +31,11 @@ final class SchemaDirectedSerializationTest extends TestCase
      */
     public function testMappingAndSerializingIsTheIdentity(): void
     {
-        $payload = ['entries' => new \stdClass(), 'names' => []];
+        $payload = ['entries' => [], 'names' => []];
 
         $registry = Schematic::map(Registry::class, $payload)->value();
         $serialized = Schematic::serialize(Registry::schema(), $registry);
 
-        self::assertSame(json_encode($payload), json_encode($serialized));
         self::assertSame('{"entries":{},"names":[]}', json_encode($serialized));
     }
 
@@ -93,12 +92,13 @@ final class SchemaDirectedSerializationTest extends TestCase
     }
 
     /**
-     * The document is what an emitted body is judged against, so where the two disagree the document's order is
-     * the one that goes out — not the constructor's, which is what drives extraction.
+     * Key order is not something JSON defines — an object is an unordered set of members — so the schema is not
+     * asked about it and nothing is reordered to match: members go out in the order extraction found them, which
+     * is the constructor's, whatever order the schema happens to name them in.
      */
-    public function testTheSchemaDecidesTheKeyOrderRatherThanTheConstructor(): void
+    public function testKeyOrderIsTheConstructorsAndIsNotAdjustedToTheSchema(): void
     {
-        self::assertSame(['second' => 2, 'first' => 1], Schematic::serialize(Reversed::schema(), new Reversed(1, 2)));
+        self::assertSame(['first' => 1, 'second' => 2], Schematic::serialize(Reversed::schema(), new Reversed(1, 2)));
     }
 
     /**
@@ -128,7 +128,7 @@ final class SchemaDirectedSerializationTest extends TestCase
      */
     public function testAUnionMemberIsBuiltAsTheBranchItsPrimitivesMatch(): void
     {
-        $registry = Schematic::map(Either::class, ['held' => ['entries' => new \stdClass(), 'names' => []]])->value();
+        $registry = Schematic::map(Either::class, ['held' => ['entries' => [], 'names' => []]])->value();
         $slug = Schematic::map(Either::class, ['held' => 'a-slug'])->value();
 
         self::assertInstanceOf(Either::class, $registry);

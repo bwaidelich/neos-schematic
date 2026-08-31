@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace Neos\Schematic\Serialization;
 
+use Neos\JsonSchema\AnyOfSchema;
 use Neos\JsonSchema\AnySchema;
 use Neos\JsonSchema\ArraySchema;
 use Neos\JsonSchema\ObjectSchema;
+use Neos\JsonSchema\OneOfSchema;
+use Neos\JsonSchema\ProvidesSchema;
 use Neos\JsonSchema\Schema;
 use Neos\Schematic\Reflection\ClassShape;
 use Neos\Schematic\Reflection\Nature;
@@ -17,10 +20,13 @@ use Neos\Schematic\UnextractableValue;
  * Reads an instance back into primitives — the mirror of {@see \Neos\Schematic\Instantiation\Instantiator}, and
  * like it driven by the class alone.
  *
- * **Extraction only.** What comes out here is what the class holds, which is not yet what the document describes:
- * PHP's one `array` type covers both of JSON's structures, so an empty map and an empty list are indistinguishable
- * at this point. {@see \Neos\JsonSchema\Validation\Projection::outbound()} is the second pass that tells them
- * apart from the schema.
+ * **One thing the class cannot answer, and the schema can.** PHP's one `array` type covers both of JSON's
+ * structures, so `[]` alone cannot say whether it was an empty map or an empty list — and neither can the value
+ * holding it. The schema can, and it is the only thing that can, which is why an empty array is emitted as `{}`
+ * exactly where the schema being read against calls it an object. That is the *whole* of what the schema decides
+ * out here: key order is nothing JSON defines, and a key the class emits is a key the document gets, whether or
+ * not the schema names it — a disagreement for {@see \Neos\Schematic\Conformance} to report rather than one to
+ * hide by dropping.
  *
  * **The schema says which kind of thing a class is; reflection says where to find it.** `Success{bool $success}`
  * publishing `type: object` is an envelope, `Slug{string $value}` publishing `type: string` is a value object,
@@ -42,11 +48,7 @@ final class Serializer
     public static function read(mixed $value, Schema|null $schema = null): mixed
     {
         if (is_array($value)) {
-            $items = $schema instanceof ArraySchema ? $schema->itemSchema(0) : null;
-            return array_map(
-                static fn(mixed $item): mixed => self::read($item, $items instanceof Schema ? $items : null),
-                $value,
-            );
+            return self::readArray($value, $schema);
         }
         if ($value instanceof \UnitEnum) {
             return $value instanceof \BackedEnum ? $value->value : $value->name;
@@ -55,6 +57,7 @@ final class Serializer
             return $value;
         }
         $shape = ClassShape::of($value::class);
+        $schema = self::branchPublishedBy($value::class, $schema);
         return match (self::natureOf($schema, $shape, $value::class)) {
             // an enum is handled above, before any reflection
             Nature::Enum => throw new \LogicException(sprintf('"%s" is not an enum instance', $value::class), 1783600501),
@@ -62,6 +65,91 @@ final class Serializer
             Nature::ListOf => self::readList($value, $shape, $schema),
             Nature::Shape => self::readShape($value, $shape, $schema),
         };
+    }
+
+    /**
+     * Primitives that are already an array: nothing to extract, so this only descends — and answers the one
+     * question the value cannot, where the schema being read against says the empty array is an object.
+     *
+     * @param array<array-key, mixed> $value
+     */
+    private static function readArray(array $value, Schema|null $schema): mixed
+    {
+        if ($schema instanceof AnyOfSchema || $schema instanceof OneOfSchema) {
+            // an empty array matching both an object branch and a list branch is the very ambiguity being settled
+            // here, so the branch the value matches is the one it is read under
+            $schema = self::branchFor($schema, $value);
+        }
+        if ($schema instanceof ArraySchema) {
+            $read = [];
+            foreach ($value as $index => $item) {
+                $itemSchema = is_int($index) ? $schema->itemSchema($index) : null;
+                $read[] = self::read($item, $itemSchema instanceof Schema ? $itemSchema : null);
+            }
+            return $read;
+        }
+        if ($schema instanceof ObjectSchema) {
+            if ($value === []) {
+                // the one thing the value cannot say about itself, and the schema just said it
+                return new \stdClass();
+            }
+            $read = [];
+            foreach ($value as $key => $item) {
+                $read[$key] = self::read($item, is_string($key) ? $schema->properties?->get($key) : null);
+            }
+            return $read;
+        }
+        // nothing describes these members – a free-form map's values, an `allOf`, no schema at all – so there is
+        // nothing here to decide, and guessing is the mistake this avoids
+        return array_map(static fn(mixed $item): mixed => self::read($item), $value);
+    }
+
+    /**
+     * The branch of a union an *instance* is read under: the one its own class publishes.
+     *
+     * A union has to be narrowed to one branch before its members mean anything — which branch a value's empty
+     * array sits under is what says whether it goes out as `{}` or `[]`. For primitives that question is settled
+     * by validating them ({@see self::branchFor()}), but an instance is not primitives yet, and asking the class
+     * is both cheaper and exact: a type published in a `oneOf` puts *its own* schema in there, so the branch that
+     * is its schema is the branch it is.
+     *
+     * A class publishing no schema, or one no branch carries, leaves the union as it was — {@see self::natureOf()}
+     * then answers from it if the branches agree on their kind, and refuses if they do not.
+     *
+     * @param class-string $className
+     */
+    private static function branchPublishedBy(string $className, Schema|null $schema): Schema|null
+    {
+        if (!$schema instanceof AnyOfSchema && !$schema instanceof OneOfSchema) {
+            return $schema;
+        }
+        if (!is_a($className, ProvidesSchema::class, true)) {
+            return $schema;
+        }
+        $published = $className::schema();
+        foreach ($schema as $branch) {
+            // identity first: a class memoizes its schema, so the branch usually *is* the very same object
+            if ($branch === $published || $branch == $published) {
+                return $branch;
+            }
+        }
+        return $schema;
+    }
+
+    /**
+     * The first branch the value satisfies, or `null` when it satisfies none — a value cannot be two shapes at once,
+     * and one that is no shape the union publishes has no branch to be read under.
+     *
+     * @param array<array-key, mixed> $value
+     */
+    private static function branchFor(AnyOfSchema|OneOfSchema $schema, array $value): Schema|null
+    {
+        foreach ($schema as $branch) {
+            if ($branch->validate($value)->valid) {
+                return $branch;
+            }
+        }
+        return null;
     }
 
     /**
@@ -128,9 +216,9 @@ final class Serializer
     }
 
     /**
-     * @return array<string, mixed>
+     * @return array<string, mixed>|\stdClass
      */
-    private static function readShape(object $value, ClassShape $shape, Schema|null $schema = null): array
+    private static function readShape(object $value, ClassShape $shape, Schema|null $schema = null): array|\stdClass
     {
         $properties = $schema instanceof ObjectSchema ? $schema->properties : null;
         $result = [];
@@ -138,7 +226,8 @@ final class Serializer
             $name = $parameter->getName();
             $result[$name] = self::read(self::publicProperty($value, $name), $properties?->get($name));
         }
-        return $result;
+        // a class holding no state at all is still an object, and `[]` would go out as a list
+        return $result === [] ? new \stdClass() : $result;
     }
 
     /**

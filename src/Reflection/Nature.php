@@ -47,7 +47,8 @@ enum Nature
      * A nullable member is unwrapped to what it wraps first ({@see Nullable::unwrap()}), since a member that may
      * be absent is still that member. A union of several substantive branches is answered when they *agree* —
      * `oneOf` of two object schemas is an object whichever branch a value turns out to be, and which one it is
-     * only matters to {@see \Neos\JsonSchema\Validation\Projection}, which asks after the value is primitives.
+     * only matters to {@see \Neos\Schematic\Serialization\Serializer}, which asks once the members are primitives
+     * and an empty one has to go out as `{}` or `[]`.
      * Branches that disagree, an `allOf`, a `$ref`: no claim, and `null`.
      */
     public static function of(Schema|null $schema): self|null
