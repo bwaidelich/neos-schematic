@@ -17,7 +17,6 @@ use Neos\JsonSchema\StringSchema;
 use Neos\JsonSchema\Support\ObjectProperties;
 use Neos\Schematic\Reflection\ClassShape;
 use Neos\Schematic\Reflection\Nature;
-use Neos\Schematic\Schematic;
 
 /**
  * Derives a **pure** JSON Schema from a class, so a type that has nothing special to say can say
@@ -78,9 +77,7 @@ final class AutoDiscoveringSchema
     private static function schemaFor(string $className, array $path): Schema
     {
         if (is_a($className, ProvidesSchema::class, true)) {
-            // the class owns its schema, cycles included — so the guard does not apply to it. Going through the
-            // facade rather than calling schema() directly keeps the "does it own one at all" answer in one place.
-            return Schematic::schemaFor($className);
+            return $className::schema();
         }
         return self::analyze($className, $path);
     }

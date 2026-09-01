@@ -21,7 +21,6 @@ use Neos\Schematic\Tests\Fixtures\Status;
 use Neos\Schematic\Tests\Fixtures\Tag;
 use Neos\Schematic\Tests\Fixtures\Tags;
 use Neos\Schematic\Tests\Fixtures\Trapped;
-use Neos\Schematic\Tests\Fixtures\WithoutSchema;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
@@ -49,32 +48,11 @@ final class SchematicTest extends TestCase
         ];
     }
 
-    public function testATypeProvidingASchemaKeepsIt(): void
-    {
-        self::assertSame(Slug::schema(), Schematic::schemaFor(Slug::class));
-    }
-
-    public function testAClassIsAskedForItsOwnSchema(): void
-    {
-        self::assertSame(['type' => 'string'], json_decode((string) json_encode(Schematic::schemaFor(Author::class)), true));
-    }
-
     /**
-     * Owning a schema is opt-in. Deriving one for a class that never asked would make the published contract an
-     * accident of its constructor, so a class that does not provide one is refused instead.
-     */
-    public function testAClassThatProvidesNoSchemaIsRefused(): void
-    {
-        $this->expectException(SchemaNotProvided::class);
-        $this->expectExceptionMessageMatches('/provides no schema: implement/');
-        Schematic::schemaFor(WithoutSchema::class);
-    }
-
-    /**
-     * And it reaches the descent, which is the only way in left for a class that never opted in: `instanciate()`
-     * says what it takes in its signature — a `class-string<ProvidesSchema>` — so a schema-less class named
-     * *directly* is a type error rather than a runtime one. Named as a *member*, reflection is all there is to go
-     * on, and the refusal is the same one, in the same terms.
+     * A class that provides no schema cannot be *named* to the facade at all: `instanciate()` takes a
+     * `class-string<ProvidesSchema>`, so writing one down is a type error rather than something to report at
+     * runtime. Where a class name arrives untyped there is nothing to read it off but reflection, and the descent
+     * into a member is the one such place — refused there, in the terms that say what to implement.
      */
     public function testTheRefusalReachesTheDescentIntoAMember(): void
     {
@@ -91,11 +69,11 @@ final class SchematicTest extends TestCase
      */
     public function testAClassDecidesForItselfWhetherItsSchemaIsBuiltOnce(): void
     {
-        self::assertSame(Schematic::schemaFor(Slug::class), Schematic::schemaFor(Slug::class));
+        self::assertSame(Slug::schema(), Slug::schema());
 
         Forgetful::$calls = 0;
-        $first = Schematic::schemaFor(Forgetful::class);
-        $second = Schematic::schemaFor(Forgetful::class);
+        $first = Forgetful::schema();
+        $second = Forgetful::schema();
 
         self::assertNotSame($first, $second);
         self::assertEquals($first, $second);

@@ -49,36 +49,13 @@ final class Schematic
     private function __construct() {}
 
     /**
-     * The JSON Schema a class owns — the one place the opt-in is decided.
-     *
-     * A class says it owns one by implementing {@see ProvidesSchema}; one that does not is an error rather than
-     * something to derive a contract for behind its back — see {@see SchemaNotProvided}.
-     *
-     * Nothing is cached here, or anywhere else in this package. Building a schema once is worth doing, and it is
-     * the class's own business: `static $schema = null; return $schema ??= ...;` in `schema()`. A class leaving
-     * that out is asking for the schema to be rebuilt on every call, once per level of nesting, on every request.
-     *
-     * @param class-string $className
-     * @throws SchemaNotProvided if the class does not provide a schema
-     */
-    public static function schemaFor(string $className): Schema
-    {
-        if (!is_a($className, ProvidesSchema::class, true)) {
-            throw SchemaNotProvided::forClass($className);
-        }
-        return $className::schema();
-    }
-
-    /**
      * Builds an instance, validating the input against the class's own schema first.
      *
      * Returns a result rather than throwing: every issue in the payload at once, with its paths, which is what a
      * caller handling input from outside wants. A named constructor, which has no half-built value object to hand
      * back, reads the same result with {@see InstanciationResult::valueOrThrow()}.
      *
-     * Safe to call from the class's own named constructor — the engine constructs directly and never calls back
-     * into `from*()`, so there is no recursion to avoid, and no closure to hand over for a constructor the class
-     * keeps private.
+     * Safe to call from the class's own named constructor.
      *
      * @template T of ProvidesSchema
      * @param class-string<T> $className
@@ -87,7 +64,7 @@ final class Schematic
     #[\NoDiscard('inspect the InstanciationResult; discarding it drops the instanciation outcome')]
     public static function instanciate(string $className, mixed $input): InstanciationResult
     {
-        $schema = self::schemaFor($className);
+        $schema = $className::schema();
         $result = $schema->validate($input);
         if (!$result->valid) {
             return InstanciationResult::failed($className, $result->issues);

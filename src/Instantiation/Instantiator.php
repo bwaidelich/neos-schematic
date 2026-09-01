@@ -140,10 +140,6 @@ final class Instantiator
     /**
      * The class a parameter is typed by, or `null` when it is a builtin (`?Foo` counts as `Foo`).
      *
-     * A class-typed parameter is a value to be built, and building goes through the class's own schema — so one
-     * that owns none is refused here, in the same terms {@see Schematic::schemaFor()} would refuse it a frame
-     * later. Saying so at this edge is what lets the descent be typed by the opt-in itself.
-     *
      * @return class-string<ProvidesSchema>|null
      * @throws SchemaNotProvided if the parameter is typed by a class that provides no schema
      */

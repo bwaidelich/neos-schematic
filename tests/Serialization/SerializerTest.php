@@ -43,25 +43,25 @@ final class SerializerTest extends TestCase
 
     public function testAScalarValueObjectIsItsValue(): void
     {
-        self::assertSame('php', Schematic::serialize(Schematic::schemaFor(Tag::class), new Tag('php')));
+        self::assertSame('php', Schematic::serialize(Tag::schema(), new Tag('php')));
     }
 
     public function testABackedEnumIsItsBackingValue(): void
     {
-        self::assertSame('draft', Schematic::serialize(Schematic::schemaFor(Status::class), Status::draft));
-        self::assertSame(5, Schematic::serialize(Schematic::schemaFor(Rating::class), Rating::high));
+        self::assertSame('draft', Schematic::serialize(Status::schema(), Status::draft));
+        self::assertSame(5, Schematic::serialize(Rating::schema(), Rating::high));
     }
 
     public function testAPureEnumIsItsCaseName(): void
     {
-        self::assertSame('phone', Schematic::serialize(Schematic::schemaFor(Channel::class), Channel::phone));
+        self::assertSame('phone', Schematic::serialize(Channel::schema(), Channel::phone));
     }
 
     public function testACollectionIsItsItems(): void
     {
         $tags = Schematic::instanciate(Tags::class, ['php', 'json'])->valueOrThrow();
 
-        self::assertSame(['php', 'json'], Schematic::serialize(Schematic::schemaFor(Tags::class), $tags));
+        self::assertSame(['php', 'json'], Schematic::serialize(Tags::schema(), $tags));
     }
 
     /**
@@ -69,7 +69,7 @@ final class SerializerTest extends TestCase
      */
     public function testATraversableCollectionIsIterated(): void
     {
-        self::assertSame(['php'], Schematic::serialize(Schematic::schemaFor(TagList::class), new TagList(new Tag('php'))));
+        self::assertSame(['php'], Schematic::serialize(TagList::schema(), new TagList(new Tag('php'))));
     }
 
     /**
@@ -80,7 +80,7 @@ final class SerializerTest extends TestCase
     {
         $post = Schematic::instanciate(Post::class, $this->payload())->value();
 
-        self::assertSame($this->payload(), Schematic::serialize(Schematic::schemaFor(Post::class), $post));
+        self::assertSame($this->payload(), Schematic::serialize(Post::schema(), $post));
     }
 
     public function testTheTraitEmitsTheSameThingAsTheFacade(): void
@@ -88,7 +88,7 @@ final class SerializerTest extends TestCase
         $post = Schematic::instanciate(Post::class, $this->payload())->value();
         self::assertInstanceOf(Post::class, $post);
 
-        self::assertSame(json_encode(Schematic::serialize(Schematic::schemaFor(Post::class), $post)), json_encode($post));
+        self::assertSame(json_encode(Schematic::serialize(Post::schema(), $post)), json_encode($post));
     }
 
     public function testANullPropertyStaysNull(): void
@@ -96,7 +96,7 @@ final class SerializerTest extends TestCase
         $payload = ['slug' => 'hello-world', 'author' => 'Ada', 'status' => 'draft', 'tags' => [], 'subtitle' => null];
         $post = Schematic::instanciate(Post::class, $payload)->value();
 
-        self::assertSame($payload, Schematic::serialize(Schematic::schemaFor(Post::class), $post));
+        self::assertSame($payload, Schematic::serialize(Post::schema(), $post));
     }
 
     /**
@@ -110,7 +110,7 @@ final class SerializerTest extends TestCase
         $this->expectException(UnextractableValue::class);
         $this->expectExceptionMessageMatches('/public property "\$secret"/');
         // the result is never produced: the call throws before it can return one
-        $unreached = Schematic::serialize(Schematic::schemaFor(Hidden::class), $hidden);
+        $unreached = Schematic::serialize(Hidden::schema(), $hidden);
     }
 
     public function testACollectionHidingItsItemsFailsLoudly(): void
@@ -120,7 +120,7 @@ final class SerializerTest extends TestCase
         $this->expectException(UnextractableValue::class);
         $this->expectExceptionMessageMatches('/IteratorAggregate/');
         // the result is never produced: the call throws before it can return one
-        $unreached = Schematic::serialize(Schematic::schemaFor(OpaqueTags::class), $tags);
+        $unreached = Schematic::serialize(OpaqueTags::schema(), $tags);
     }
 
     public function testPrimitivesPassThrough(): void
