@@ -9,7 +9,6 @@ use Neos\JsonSchema\ProvidesSchema;
 use Neos\JsonSchema\Schema;
 use Neos\Schematic\Reflection\ClassShape;
 use Neos\Schematic\Reflection\Nature;
-use Neos\Schematic\SchemaNotProvided;
 use Neos\Schematic\Schematic;
 
 /**
@@ -140,8 +139,13 @@ final class Instantiator
     /**
      * The class a parameter is typed by, or `null` when it is a builtin (`?Foo` counts as `Foo`).
      *
+     * Reflection is the one place a class name arrives with nothing to vouch for it, so this is where owning a
+     * schema is established rather than assumed — everything downstream takes a `class-string<ProvidesSchema>`
+     * and has nothing left to ask. A member typed by a class that owns none cannot be reached through a schema
+     * this package derived, since analysis refuses such a member while *building* the schema; a hand-written
+     * `schema()` describing one is the way in, and it is a bug in that class, not in the payload.
+     *
      * @return class-string<ProvidesSchema>|null
-     * @throws SchemaNotProvided if the parameter is typed by a class that provides no schema
      */
     private static function classType(\ReflectionParameter|null $parameter): string|null
     {
@@ -152,7 +156,12 @@ final class Instantiator
         /** @var class-string $name */
         $name = $type->getName();
         if (!is_a($name, ProvidesSchema::class, true)) {
-            throw SchemaNotProvided::forClass($name);
+            throw new \LogicException(sprintf(
+                'Cannot build the member typed "%s": it provides no schema, so there is nothing to build it '
+                . 'against — implement %s',
+                $name,
+                ProvidesSchema::class,
+            ), 1783600413);
         }
         return $name;
     }

@@ -6,7 +6,6 @@ namespace Neos\Schematic\Tests;
 
 use Neos\JsonSchema\Validation\IssueCode;
 use Neos\Schematic\CoercionFailed;
-use Neos\Schematic\SchemaNotProvided;
 use Neos\Schematic\Schematic;
 use Neos\Schematic\Tests\Fixtures\Adopting;
 use Neos\Schematic\Tests\Fixtures\Author;
@@ -30,7 +29,6 @@ use PHPUnit\Framework\TestCase;
  */
 #[CoversClass(Schematic::class)]
 #[CoversClass(CoercionFailed::class)]
-#[CoversClass(SchemaNotProvided::class)]
 #[CoversClass(\Neos\Schematic\Instantiation\Instantiator::class)]
 final class SchematicTest extends TestCase
 {
@@ -56,8 +54,8 @@ final class SchematicTest extends TestCase
      */
     public function testTheRefusalReachesTheDescentIntoAMember(): void
     {
-        $this->expectException(SchemaNotProvided::class);
-        $this->expectExceptionMessageMatches('/provides no schema: implement/');
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessageMatches('/provides no schema, so there is nothing to build it against/');
         // the result is never produced: the call throws before it can return one
         $unreached = Schematic::instanciate(Adopting::class, ['held' => ['value' => 'anything']]);
     }
