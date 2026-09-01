@@ -29,7 +29,13 @@ use PHPUnit\Framework\TestCase;
  */
 #[CoversClass(Schematic::class)]
 #[CoversClass(CoercionFailed::class)]
-#[CoversClass(\Neos\Schematic\Instantiation\Instantiator::class)]
+#[CoversClass(\Neos\Schematic\Instantiation\EnumCase::class)]
+#[CoversClass(\Neos\Schematic\Instantiation\ScalarValue::class)]
+#[CoversClass(\Neos\Schematic\Instantiation\ListOfItems::class)]
+#[CoversClass(\Neos\Schematic\Instantiation\NamedShape::class)]
+#[CoversClass(\Neos\Schematic\Instantiation\Unbuildable::class)]
+#[CoversClass(\Neos\Schematic\Instantiation\Helper\Construct::class)]
+#[CoversClass(\Neos\Schematic\Instantiation\Helper\MemberType::class)]
 final class SchematicTest extends TestCase
 {
     /**
