@@ -18,14 +18,17 @@ use Neos\JsonSchema\StringSchema;
 /**
  * What kind of thing a value is, as far as building it from primitives (and reading it back) is concerned.
  *
- * There are two ways to find out, and they are asked in this order:
+ * There are two ways to find out:
  *
- * - {@see self::of()} — from the **schema**, which is authoritative because it is the published contract. It is
+ * - {@see self::fromSchema()} — from the **schema**, which is authoritative because it is the published contract. It is
  *   also the only one that can answer for a one-member envelope whose member is a scalar: `Success{bool $success}`
- *   is written exactly like `Slug{string $value}` and means the opposite.
- * - {@see ClassShape} — from the **class**, for the positions a schema cannot answer for: a genuine multi-branch
- *   union, an `allOf`, a `$ref`, or no schema at all — and for {@see \Neos\Schematic\Discovery\AutoDiscoveringSchema},
- *   which derives the schema *from* the class and so has nothing to ask.
+ *   is written exactly like `Slug{string $value}` and means the opposite. Asked of the schema a class owns, this
+ *   is the whole of what building consults.
+ * - {@see ClassShape} — from the **class**, where there is no schema to consult:
+ *   {@see \Neos\Schematic\Discovery\AutoDiscoveringSchema} derives one *from* a class, and
+ *   {@see \Neos\Schematic\Serialization\Serializer} reads a value under a *declared* type that may abstain.
+ *
+ * @internal
  */
 enum Nature
 {
@@ -42,7 +45,14 @@ enum Nature
     case Shape;
 
     /**
-     * What the schema says, or `null` where it makes no structural claim at all.
+     * What the schema says, or `null` where it makes no structural claim at all — which is what
+     * {@see \Neos\Schematic\Instantiation\Unbuildable} refuses.
+     *
+     * **Building asks this and nothing else**, of the schema the class itself owns: `Nature::fromSchema($className::schema())`.
+     * There is no fallback to the class there — a class whose published contract claims nothing has told the
+     * engine nothing, and a link that knows what it is builds it instead. Nor does this ever answer
+     * {@see self::Enum}: an enum publishes the schema of its *cases*, so it reads `Scalar`, and
+     * {@see \Neos\Schematic\Instantiation\EnumCase} asks the class directly and is asked first.
      *
      * A nullable member is unwrapped to what it wraps first ({@see Nullable::unwrap()}), since a member that may
      * be absent is still that member. A union of several substantive branches is answered when they *agree* —
@@ -51,7 +61,7 @@ enum Nature
      * and an empty one has to go out as `{}` or `[]`.
      * Branches that disagree, an `allOf`, a `$ref`: no claim, and `null`.
      */
-    public static function of(Schema|null $schema): self|null
+    public static function fromSchema(Schema|null $schema): self|null
     {
         $schema = Nullable::unwrap($schema);
         if ($schema instanceof AnyOfSchema || $schema instanceof OneOfSchema) {
@@ -75,7 +85,7 @@ enum Nature
     {
         $agreed = null;
         foreach ($schema as $branch) {
-            $branchNature = self::of($branch);
+            $branchNature = self::fromSchema($branch);
             if ($branchNature === null || ($agreed !== null && $agreed !== $branchNature)) {
                 return null;
             }

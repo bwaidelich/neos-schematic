@@ -6,7 +6,12 @@ namespace Neos\Schematic;
 
 use Neos\JsonSchema\ProvidesSchema;
 use Neos\JsonSchema\Schema;
+use Neos\Schematic\Instantiation\EnumCase;
 use Neos\Schematic\Instantiation\Instantiator;
+use Neos\Schematic\Instantiation\ListOfItems;
+use Neos\Schematic\Instantiation\NamedShape;
+use Neos\Schematic\Instantiation\ScalarValue;
+use Neos\Schematic\Instantiation\Unbuildable;
 use Neos\Schematic\Serialization\Serializer;
 
 /**
@@ -35,8 +40,10 @@ use Neos\Schematic\Serialization\Serializer;
  * **Validation happens on the one path that produces an instance**, which is what makes a value object valid
  * however it was built: {@see self::instanciate()} validates the whole payload against the class's own schema
  * before constructing anything, so that one bad request reports every issue in it at once instead of the first one
- * as an exception. A leaf is therefore validated once per level of nesting above it — accepted deliberately,
- * because the invariant holding everywhere is worth more than the saving.
+ * as an exception. A leaf is validated *there*, in that one pass, because a class's schema embeds the schemas of
+ * everything it contains — so the engine below this line builds and never judges. The one thing that escapes it is
+ * a hand-written `schema()` describing a member more loosely than that member's own schema does: nothing re-checks
+ * it, and its constructor is the last word. A derived schema cannot say that.
  *
  * **Construction is the constructor, always.** Whatever a class calls its own way in, the engine builds it by
  * calling `__construct()` with the validated primitives — see {@see Instantiator}. There is no closure to hand
@@ -64,12 +71,15 @@ final class Schematic
     #[\NoDiscard('inspect the InstanciationResult; discarding it drops the instanciation outcome')]
     public static function instanciate(string $className, mixed $input): InstanciationResult
     {
-        $schema = $className::schema();
-        $result = $schema->validate($input);
+        $result = $className::schema()->validate($input);
         if (!$result->valid) {
             return InstanciationResult::failed($className, $result->issues);
         }
-        return InstanciationResult::built(Instantiator::build($className, $input, $schema));
+        // the chain, in the order it is asked: the specific kinds first, the general shape last, and a refusal
+        // for what none of them claimed. A client wanting a kind of its own builds this chain with a link of its
+        // own in front and calls it directly — there is nothing here for it to register with.
+        $instantiator = new EnumCase(new ScalarValue(new ListOfItems(new NamedShape(new Unbuildable()))));
+        return InstanciationResult::built($instantiator->build($className, $input, $instantiator));
     }
 
     /**

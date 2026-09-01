@@ -8,12 +8,13 @@ namespace Neos\Schematic\Reflection;
  * A reading of a class taken from the class alone: its {@see Nature}, and the constructor parameters that make it
  * up. Read once and passed around.
  *
- * **Where this is the answer, and where it is a fallback.** It is the whole answer for
+ * **Where this is the answer, and where it is not consulted at all.** It is the whole answer for
  * {@see \Neos\Schematic\Discovery\AutoDiscoveringSchema}, which derives a schema *from* a class and so has none
- * to consult, and for {@see \Neos\Schematic\Serialization\Serializer}, which compares this reading against the
- * published one. {@see \Neos\Schematic\Serialization\Serializer} prefers the schema and falls back to this
- * where the schema has no single structural reading — a multi-branch union, an `allOf`, a `$ref`, or nothing.
- * {@see \Neos\Schematic\Instantiation\Instantiator} still reads by nature alone.
+ * to consult. {@see \Neos\Schematic\Serialization\Serializer} prefers the published schema and falls back to
+ * this reading where that schema abstains — a declared type may be `AnySchema` or absent, and then the class is
+ * the only source left. Going *in* there is no such gap: the schema is the class's own, so
+ * {@see Nature::fromSchema()} reads that schema and stops there, and this reading is used only for the
+ * parameters it names.
  *
  * The nature is decided from the class alone, in this order, which makes it unambiguous:
  *
@@ -30,6 +31,8 @@ namespace Neos\Schematic\Reflection;
  * one-member envelope whose member is a scalar is the one case a constructor cannot settle — `Success{bool $success}`
  * is written exactly like `Slug{string $value}` — so the schema settles that one, in
  * {@see \Neos\Schematic\Serialization\Serializer}.
+ *
+ * @internal
  */
 final readonly class ClassShape
 {
@@ -40,8 +43,10 @@ final readonly class ClassShape
     private function __construct(
         public string $className,
         public Nature $nature,
-        public array $parameters,
-    ) {}
+        public array  $parameters,
+    )
+    {
+    }
 
     /**
      * @param class-string $className

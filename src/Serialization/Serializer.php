@@ -170,7 +170,7 @@ final class Serializer
         if ($schema === null || $schema instanceof AnySchema) {
             return $shape->nature;
         }
-        return Nature::of($schema) ?? throw new UnextractableValue(sprintf(
+        return Nature::fromSchema($schema) ?? throw new UnextractableValue(sprintf(
             'The schema published for "%s" here has no single structural reading — a union whose branches are '
             . 'different kinds of thing, an "allOf" or a "$ref" — so it cannot say whether the value is an object, '
             . 'a list or a single value. Publish this member under a schema that says which.',
