@@ -19,8 +19,10 @@ Schematic is **a bridge between PHP classes and JSON Schema**. A type owns its s
     * [Recommended: Classes validating themselves via static `fromXY` methods](#recommended-classes-validating-themselves-via-static-fromxy-methods)
     * [Custom instantiation with Instantiator Chains](#custom-instantiation-with-instantiator-chains)
   * [Serialization of objects](#serialization-of-objects)
+  * [Types you do not own](#types-you-do-not-own)
+    * [A stand-in, when the constraint is shared](#a-stand-in-when-the-constraint-is-shared)
   * [Known limitations](#known-limitations)
-  * [Contribution](#contribution)
+  * [License](#license)
 <!-- TOC -->
 
 ## Installation
@@ -416,6 +418,155 @@ A class emitting a member its schema does *not* describe is raised as an `Unextr
 field going out is something no client could ever report.
 
 Extraction reads **public properties only**.
+
+## Types you do not own
+
+A type from another package cannot implement `ProvidesSchema`, and you may not want to wrap it either — the rest of
+your code should keep dealing with the real type.
+
+You can have that, because the engine reads **the constructor**, not the property list:
+
+- discovery describes each *constructor parameter*'s type,
+- instantiation builds each parameter's type and passes it in,
+- serialization reads the public property **named after each parameter**.
+
+So a parameter and the property it fills may be different types. The parameter is what the schema describes; the
+property is the foreign type; the constructor converts between them. In the simplest case there is no extra class at
+all — the parameter is the primitive, and the schema you write says what it must look like:
+
+```php
+use Neos\JsonSchema\ObjectSchema;
+use Neos\JsonSchema\ProvidesSchema;
+use Neos\JsonSchema\Schema;
+use Neos\JsonSchema\StringSchema;
+use Neos\JsonSchema\Support\ObjectProperties;
+use Neos\Schematic\Schematic;
+
+/**
+ * The type you cannot change: no `schema()`, and the rule it enforces lives in a pattern nothing can read.
+ */
+final readonly class ForeignId
+{
+    private function __construct(public string $value) {}
+
+    public static function fromString(string $value): self
+    {
+        if (preg_match('/^[a-z0-9\-]{1,64}$/', $value) !== 1) {
+            throw new \InvalidArgumentException(sprintf('Not an id: "%s"', $value));
+        }
+        return new self($value);
+    }
+}
+
+final readonly class Entry implements ProvidesSchema
+{
+    /** the foreign type, which is what the rest of your code reads */
+    public ForeignId $id;
+
+    public function __construct(string $id, public string $label)
+    {
+        $this->id = ForeignId::fromString($id);
+    }
+
+    public static function schema(): Schema
+    {
+        static $schema = null;
+        return $schema ??= ObjectSchema::create(
+            properties: ObjectProperties::create(
+                // the constraint the foreign type keeps where reflection cannot see it
+                id: StringSchema::create(pattern: '^[a-z0-9\-]{1,64}$', examples: ['first-entry']),
+                label: StringSchema::create(),
+            ),
+            additionalProperties: false,
+            required: ['id', 'label'],
+        );
+    }
+}
+
+$entry = Schematic::instantiate(Entry::class, ['id' => 'first-entry', 'label' => 'First'])->valueOrThrow();
+
+// built from primitives, and what arrives in the property is the foreign type
+assert($entry->id instanceof ForeignId);
+assert($entry->id->value === 'first-entry');
+
+// and it goes back out as the primitive the schema describes, because the schema says the slot is a string and
+// the foreign type is a single value holding one
+assert(json_encode(Schematic::serialize($entry)) === '{"id":"first-entry","label":"First"}');
+
+// a bad id is *reported* against the published schema, not thrown by the foreign constructor
+assert(Schematic::instantiate(Entry::class, ['id' => 'NOT AN ID', 'label' => 'First'])->success === false);
+```
+
+That last assertion is the reason to write the pattern down rather than let the foreign type enforce it alone:
+everything the published schema accepts reaches `ForeignId::fromString()`, and whatever *it* rejects comes back as an
+exception instead of an issue.
+
+### A stand-in, when the constraint is shared
+
+Writing the schema by hand is fine for one class. When several classes carry the same foreign type — or when you want
+[AutoDiscoveringSchema](#autodiscoveringschema) to keep deriving the whole thing — give the constraint a type of its
+own. It needs to be nothing more than a value and a schema:
+
+```php
+// ... continues the example above
+use Neos\Schematic\Discovery\AutoDiscoveringSchema;
+
+final readonly class ForeignIdApiWrapper implements ProvidesSchema
+{
+    public function __construct(public string $value) {}
+
+    public static function schema(): Schema
+    {
+        static $schema = null;
+        return $schema ??= StringSchema::create(pattern: '^[a-z0-9\-]{1,64}$', examples: ['first-entry']);
+    }
+}
+
+final readonly class Tag implements ProvidesSchema
+{
+    public ForeignId $id;
+
+    public function __construct(ForeignIdApiWrapper $id, public string $name)
+    {
+        $this->id = ForeignId::fromString($id->value);
+    }
+
+    public static function schema(): Schema
+    {
+        static $schema = null;
+        return $schema ??= AutoDiscoveringSchema::analyze(self::class);
+    }
+}
+
+$tag = Schematic::instantiate(Tag::class, ['id' => 'second-entry', 'name' => 'Second'])->valueOrThrow();
+
+assert($tag->id instanceof ForeignId);
+assert(json_encode(Schematic::serialize($tag)) === '{"id":"second-entry","name":"Second"}');
+```
+
+No conversion methods on the stand-in, and nothing builds it on the way out — serialization reads the property, sees a
+single-value object, and emits its value under the schema the slot published.
+
+Two variants worth knowing:
+
+- **Take the foreign type in a named constructor.** The constructors above accept a primitive or a stand-in, so a
+  caller holding a real `ForeignId` writes `$id->value`. Adding
+  `public static function create(ForeignId $id, string $label): self` removes that from every call site, at the cost
+  of repeating the parameter list once. Worth it when there are several call sites; not when there is one.
+- **Keep the property primitive and convert on the way out.** A `public function id(): ForeignId` next to a plain
+  `public string $id` costs one line instead of two and needs no constructor body — but consumers call a method, and
+  the conversion runs on every read.
+
+And three things to keep in mind:
+
+- **The property must carry the same name as the parameter.** Serialization looks the member up by the parameter's
+  name, and a mismatch is an `UnextractableValue` telling you so.
+- **The foreign type has to expose the state going out.** Serialization reads public properties. If it exposes none,
+  keep the stand-in in the property and add a method returning the foreign type.
+- **A stand-in is a type your documentation will name**, since it is the type the constructor declares. A name like
+  `ForeignIdApiWrapper` says exactly what it is to a reader of the code, and a generated document will then carry that
+  name too — so pick whichever of the two audiences matters more, and pick it deliberately. Taking the primitive, as
+  in the first example, publishes nothing extra at all.
 
 ## Known limitations
 
