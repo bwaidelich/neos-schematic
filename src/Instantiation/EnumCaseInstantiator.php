@@ -12,7 +12,7 @@ use Neos\JsonSchema\ProvidesSchema;
  *
  * @api
  */
-final readonly class EnumCase implements Instantiator
+final readonly class EnumCaseInstantiator implements Instantiator
 {
     public function __construct(private Instantiator $next) {}
 

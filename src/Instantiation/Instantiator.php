@@ -12,15 +12,15 @@ use Neos\Schematic\Schematic;
  *
  * Each link is able to build one kind of thing and hands everything else to the next:
  * new instantiators (e.g. for `DateTimeImmutable`, or other special cases) are added in front of the built-in ones.
- * The default chain is assembled in {@see Schematic::instanciate()} and ends in {@see Unbuildable},
+ * The default chain is assembled in {@see Schematic::instantiate()} and ends in {@see UnbuildableInstantiator},
  * which fails with an exception.
  *
  * Schema Validation should happen before the chain runs.
  *
- * **The constructor is called for instanciating, even if it is private.**.
+ * **The constructor is called for instantiating, even if it is private.**.
  *
  * The engine deliberately does *not* call `from*()` named constructors, as that is reserved for external building,
- * where one can call {@see Schematic::instanciate()}.
+ * where one can call {@see Schematic::instantiate()}.
  *
  * **`$root` must be the chain itself**, handed to every link so that recursion re-enters at the top rather
  * than continuing where it left off.

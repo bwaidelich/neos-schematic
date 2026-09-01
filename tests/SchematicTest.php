@@ -29,11 +29,11 @@ use PHPUnit\Framework\TestCase;
  */
 #[CoversClass(Schematic::class)]
 #[CoversClass(CoercionFailed::class)]
-#[CoversClass(\Neos\Schematic\Instantiation\EnumCase::class)]
-#[CoversClass(\Neos\Schematic\Instantiation\ScalarValue::class)]
-#[CoversClass(\Neos\Schematic\Instantiation\ListOfItems::class)]
-#[CoversClass(\Neos\Schematic\Instantiation\NamedShape::class)]
-#[CoversClass(\Neos\Schematic\Instantiation\Unbuildable::class)]
+#[CoversClass(\Neos\Schematic\Instantiation\EnumCaseInstantiator::class)]
+#[CoversClass(\Neos\Schematic\Instantiation\ScalarValueInstantiator::class)]
+#[CoversClass(\Neos\Schematic\Instantiation\ListOfItemsInstantiator::class)]
+#[CoversClass(\Neos\Schematic\Instantiation\NamedShapeInstantiator::class)]
+#[CoversClass(\Neos\Schematic\Instantiation\UnbuildableInstantiator::class)]
 #[CoversClass(\Neos\Schematic\Instantiation\Helper\Construct::class)]
 #[CoversClass(\Neos\Schematic\Instantiation\Helper\MemberType::class)]
 final class SchematicTest extends TestCase
@@ -53,7 +53,7 @@ final class SchematicTest extends TestCase
     }
 
     /**
-     * A class that provides no schema cannot be *named* to the facade at all: `instanciate()` takes a
+     * A class that provides no schema cannot be *named* to the facade at all: `instantiate()` takes a
      * `class-string<ProvidesSchema>`, so writing one down is a type error rather than something to report at
      * runtime. Where a class name arrives untyped there is nothing to read it off but reflection, and the descent
      * into a member is the one such place — refused there, in the terms that say what to implement.
@@ -63,7 +63,7 @@ final class SchematicTest extends TestCase
         $this->expectException(\LogicException::class);
         $this->expectExceptionMessageMatches('/provides no schema, so there is nothing to build it against/');
         // the result is never produced: the call throws before it can return one
-        $unreached = Schematic::instanciate(Adopting::class, ['held' => ['value' => 'anything']]);
+        $unreached = Schematic::instantiate(Adopting::class, ['held' => ['value' => 'anything']]);
     }
 
     /**
@@ -97,7 +97,7 @@ final class SchematicTest extends TestCase
      */
     public function testTheOrdinaryEntryPointReachesAPrivateConstructor(): void
     {
-        self::assertEquals(Slug::fromString('hello-world'), Schematic::instanciate(Slug::class, 'hello-world')->valueOrThrow());
+        self::assertEquals(Slug::fromString('hello-world'), Schematic::instantiate(Slug::class, 'hello-world')->valueOrThrow());
     }
 
     /**
@@ -106,12 +106,12 @@ final class SchematicTest extends TestCase
     public function testReachingAPrivateConstructorStillValidates(): void
     {
         $this->expectException(CoercionFailed::class);
-        Schematic::instanciate(Slug::class, 'Hello World')->valueOrThrow();
+        Schematic::instantiate(Slug::class, 'Hello World')->valueOrThrow();
     }
 
     public function testAShapeReachesAPrivateConstructorByNamedArguments(): void
     {
-        $hidden = Schematic::instanciate(Hidden::class, 'secret')->valueOrThrow();
+        $hidden = Schematic::instantiate(Hidden::class, 'secret')->valueOrThrow();
 
         self::assertSame('secret', $hidden->reveal());
     }
@@ -122,7 +122,7 @@ final class SchematicTest extends TestCase
      */
     public function testTheEngineNeverCallsANamedConstructor(): void
     {
-        $trapped = Schematic::instanciate(Trapped::class, 'quiet')->valueOrThrow();
+        $trapped = Schematic::instantiate(Trapped::class, 'quiet')->valueOrThrow();
 
         self::assertSame('quiet', $trapped->value);
     }
@@ -150,7 +150,7 @@ final class SchematicTest extends TestCase
 
     public function testAClassWithAPublicConstructorIsBuiltDirectly(): void
     {
-        $author = Schematic::instanciate(Author::class, 'Ada')->valueOrThrow();
+        $author = Schematic::instantiate(Author::class, 'Ada')->valueOrThrow();
 
         self::assertInstanceOf(Author::class, $author);
         self::assertSame('Ada', $author->name);
@@ -162,14 +162,14 @@ final class SchematicTest extends TestCase
      */
     public function testAPrivateConstructorWithoutANamedConstructorIsStillBuilt(): void
     {
-        $reclusive = Schematic::instanciate(Reclusive::class, 'nope')->valueOrThrow();
+        $reclusive = Schematic::instantiate(Reclusive::class, 'nope')->valueOrThrow();
 
         self::assertSame('nope', $reclusive->value);
     }
 
     public function testAWholeShapeIsBuiltFromAPayload(): void
     {
-        $result = Schematic::instanciate(Post::class, $this->payload());
+        $result = Schematic::instantiate(Post::class, $this->payload());
 
         self::assertTrue($result->success, (string) $result->issues);
         $post = $result->value();
@@ -187,7 +187,7 @@ final class SchematicTest extends TestCase
      */
     public function testANestedValueObjectGoesThroughItsOwnNamedConstructor(): void
     {
-        $post = Schematic::instanciate(Post::class, $this->payload())->value();
+        $post = Schematic::instantiate(Post::class, $this->payload())->value();
 
         self::assertInstanceOf(Post::class, $post);
         self::assertEquals(Slug::fromString('hello-world'), $post->slug);
@@ -198,7 +198,7 @@ final class SchematicTest extends TestCase
         $payload = $this->payload();
         unset($payload['subtitle']);
 
-        $post = Schematic::instanciate(Post::class, $payload)->value();
+        $post = Schematic::instantiate(Post::class, $payload)->value();
 
         self::assertInstanceOf(Post::class, $post);
         self::assertNull($post->subtitle);
@@ -210,15 +210,15 @@ final class SchematicTest extends TestCase
      */
     public function testEveryIssueInAPayloadIsReportedAtItsOwnPath(): void
     {
-        $result = Schematic::instanciate(Post::class, ['slug' => 'Hello World', 'author' => 'Ada', 'status' => 'nope', 'tags' => []]);
+        $result = Schematic::instantiate(Post::class, ['slug' => 'Hello World', 'author' => 'Ada', 'status' => 'nope', 'tags' => []]);
 
         self::assertFalse($result->success);
         self::assertSame(['slug', 'status'], array_map(static fn($issue): string => $issue->pathAsString(), $result->issues->toArray()));
     }
 
-    public function testInstanciateReportsIssuesInsteadOfThrowing(): void
+    public function testInstantiateReportsIssuesInsteadOfThrowing(): void
     {
-        $result = Schematic::instanciate(Slug::class, 'Hello World');
+        $result = Schematic::instantiate(Slug::class, 'Hello World');
 
         self::assertFalse($result->success);
         self::assertSame([IssueCode::InvalidPattern->value], $result->issues->codes());
@@ -226,17 +226,17 @@ final class SchematicTest extends TestCase
 
     public function testABackedEnumIsResolvedByItsValue(): void
     {
-        self::assertSame(Rating::high, Schematic::instanciate(Rating::class, 5)->valueOrThrow());
+        self::assertSame(Rating::high, Schematic::instantiate(Rating::class, 5)->valueOrThrow());
     }
 
     public function testAPureEnumIsResolvedByItsCaseName(): void
     {
-        self::assertSame(Channel::phone, Schematic::instanciate(Channel::class, 'phone')->valueOrThrow());
+        self::assertSame(Channel::phone, Schematic::instantiate(Channel::class, 'phone')->valueOrThrow());
     }
 
     public function testACollectionIsBuiltFromAList(): void
     {
-        $tags = Schematic::instanciate(Tags::class, ['php', 'json'])->valueOrThrow();
+        $tags = Schematic::instantiate(Tags::class, ['php', 'json'])->valueOrThrow();
 
         self::assertInstanceOf(Tags::class, $tags);
         self::assertSame(['php', 'json'], array_map(static fn(Tag $tag): string => $tag->value, $tags->tags));
@@ -249,8 +249,8 @@ final class SchematicTest extends TestCase
      */
     public function testAValueIsJudgedExactlyAsItArrives(): void
     {
-        self::assertSame(Rating::high, Schematic::instanciate(Rating::class, 5)->valueOrThrow());
-        self::assertFalse(Schematic::instanciate(Rating::class, '5')->success);
+        self::assertSame(Rating::high, Schematic::instantiate(Rating::class, 5)->valueOrThrow());
+        self::assertFalse(Schematic::instantiate(Rating::class, '5')->success);
     }
 
     /**
@@ -258,7 +258,7 @@ final class SchematicTest extends TestCase
      */
     public function testAStdClassPayloadIsReportedRatherThanUnwrapped(): void
     {
-        $result = Schematic::instanciate(Post::class, (object) $this->payload());
+        $result = Schematic::instantiate(Post::class, (object) $this->payload());
 
         self::assertFalse($result->success);
         self::assertSame([IssueCode::InvalidType->value], $result->issues->codes());

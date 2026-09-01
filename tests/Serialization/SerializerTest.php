@@ -59,7 +59,7 @@ final class SerializerTest extends TestCase
 
     public function testACollectionIsItsItems(): void
     {
-        $tags = Schematic::instanciate(Tags::class, ['php', 'json'])->valueOrThrow();
+        $tags = Schematic::instantiate(Tags::class, ['php', 'json'])->valueOrThrow();
 
         self::assertSame(['php', 'json'], Schematic::serialize($tags));
     }
@@ -78,14 +78,14 @@ final class SerializerTest extends TestCase
      */
     public function testAShapeRoundTripsThroughItsPrimitives(): void
     {
-        $post = Schematic::instanciate(Post::class, $this->payload())->value();
+        $post = Schematic::instantiate(Post::class, $this->payload())->value();
 
         self::assertSame($this->payload(), Schematic::serialize($post));
     }
 
     public function testTheTraitEmitsTheSameThingAsTheFacade(): void
     {
-        $post = Schematic::instanciate(Post::class, $this->payload())->value();
+        $post = Schematic::instantiate(Post::class, $this->payload())->value();
         self::assertInstanceOf(Post::class, $post);
 
         self::assertSame(json_encode(Schematic::serialize($post)), json_encode($post));
@@ -94,7 +94,7 @@ final class SerializerTest extends TestCase
     public function testANullPropertyStaysNull(): void
     {
         $payload = ['slug' => 'hello-world', 'author' => 'Ada', 'status' => 'draft', 'tags' => [], 'subtitle' => null];
-        $post = Schematic::instanciate(Post::class, $payload)->value();
+        $post = Schematic::instantiate(Post::class, $payload)->value();
 
         self::assertSame($payload, Schematic::serialize($post));
     }

@@ -8,7 +8,7 @@ use Neos\JsonSchema\ProvidesSchema;
 use Neos\JsonSchema\Validation\Issues;
 
 /**
- * The outcome of {@see Schematic::instanciate()}: *either* the instance that was built, *or* every reason why the
+ * The outcome of {@see Schematic::instantiate()}: *either* the instance that was built, *or* every reason why the
  * payload could not be built. The {@see self::$issues} come from `neos/jsonschema`, so a caller can report them with
  * their paths as validation found them.
  *
@@ -18,7 +18,7 @@ use Neos\JsonSchema\Validation\Issues;
  *
  * @template T of ProvidesSchema
  */
-final readonly class InstanciationResult
+final readonly class InstantiationResult
 {
     /**
      * @param T|null $value
@@ -49,19 +49,19 @@ final readonly class InstanciationResult
     public static function failed(string $className, Issues $issues): self
     {
         if ($issues->toArray() === []) {
-            throw new \InvalidArgumentException('A failed InstanciationResult requires at least one issue', 1783600500);
+            throw new \InvalidArgumentException('A failed InstantiationResult requires at least one issue', 1783600500);
         }
         return new self(false, null, $className, $issues);
     }
 
     /**
      * @return T
-     * @throws \LogicException if the instanciation failed — inspect {@see self::$success} first
+     * @throws \LogicException if the instantiation failed — inspect {@see self::$success} first
      */
     public function value(): object
     {
         if (!$this->success || $this->value === null) {
-            throw new \LogicException('Cannot read the value of a failed instanciation', 1783600501);
+            throw new \LogicException('Cannot read the value of a failed instantiation', 1783600501);
         }
         return $this->value;
     }
@@ -71,7 +71,7 @@ final readonly class InstanciationResult
      * invariant, where the input is the caller's own and a bad one is a bug rather than a report to render.
      *
      * @return T
-     * @throws CoercionFailed if the instanciation failed
+     * @throws CoercionFailed if the instantiation failed
      */
     public function valueOrThrow(): object
     {

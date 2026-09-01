@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Neos\Schematic\Instantiation\Helper;
 
 /**
- * Helper for instanciation, also invoking private constructors.
+ * Helper for instantiation, also invoking private constructors.
  *
  * @internal
  */

@@ -15,7 +15,7 @@ use Neos\JsonSchema\ProvidesSchema;
  *
  * @api
  */
-final readonly class Unbuildable implements Instantiator
+final readonly class UnbuildableInstantiator implements Instantiator
 {
     /**
      * @template T of ProvidesSchema
@@ -25,7 +25,7 @@ final readonly class Unbuildable implements Instantiator
     public function build(string $className, mixed $value, Instantiator $root): object
     {
         throw new \LogicException(sprintf(
-            'The schema published for "%s" could not be built by any Instanciator, from: %s',
+            'The schema published for "%s" could not be built by any Instantiator, from: %s',
             $className,
             self::render($value),
         ), 1783600412);

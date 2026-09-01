@@ -18,7 +18,7 @@ use Neos\Schematic\Reflection\Nature;
  *
  * @api
  */
-final readonly class NamedShape implements Instantiator
+final readonly class NamedShapeInstantiator implements Instantiator
 {
     public function __construct(private Instantiator $next) {}
 

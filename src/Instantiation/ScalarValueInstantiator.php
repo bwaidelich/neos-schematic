@@ -14,7 +14,7 @@ use Neos\Schematic\Reflection\Nature;
  *
  * @api
  */
-final readonly class ScalarValue implements Instantiator
+final readonly class ScalarValueInstantiator implements Instantiator
 {
     public function __construct(private Instantiator $next) {}
 

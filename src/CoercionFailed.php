@@ -7,12 +7,12 @@ namespace Neos\Schematic;
 use Neos\JsonSchema\Validation\Issues;
 
 /**
- * Thrown by {@see InstanciationResult::valueOrThrow()} when the input did not satisfy the class's own schema.
+ * Thrown by {@see InstantiationResult::valueOrThrow()} when the input did not satisfy the class's own schema.
  *
  * A named constructor is the one place a value object's invariant is enforced, so it *throws* — there is no
  * instance to hand back, and a caller writing `Slug::fromString($value)` wants that to be the end of it.
  *
- * The result {@see Schematic::instanciate()} returns covers the other case: a whole payload arriving from outside,
+ * The result {@see Schematic::instantiate()} returns covers the other case: a whole payload arriving from outside,
  * where every issue in it is wanted at once rather than the first one as an exception.
  */
 final class CoercionFailed extends \RuntimeException

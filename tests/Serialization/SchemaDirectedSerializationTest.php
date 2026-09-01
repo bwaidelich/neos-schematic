@@ -27,14 +27,14 @@ use PHPUnit\Framework\TestCase;
 final class SchemaDirectedSerializationTest extends TestCase
 {
     /**
-     * The property that was missing while serialization took no schema: `instanciate()` followed by `serialize()` gives
+     * The property that was missing while serialization took no schema: `instantiate()` followed by `serialize()` gives
      * back what went in, empty map and empty list included.
      */
-    public function testInstanciatingAndSerializingIsTheIdentity(): void
+    public function testInstantiatingAndSerializingIsTheIdentity(): void
     {
         $payload = ['entries' => [], 'names' => []];
 
-        $registry = Schematic::instanciate(Registry::class, $payload)->value();
+        $registry = Schematic::instantiate(Registry::class, $payload)->value();
         $serialized = Schematic::serialize($registry);
 
         self::assertSame('{"entries":{},"names":[]}', json_encode($serialized));
@@ -44,7 +44,7 @@ final class SchemaDirectedSerializationTest extends TestCase
     {
         $payload = ['entries' => ['a' => 1, 'b' => 2], 'names' => ['x']];
 
-        $registry = Schematic::instanciate(Registry::class, $payload)->value();
+        $registry = Schematic::instantiate(Registry::class, $payload)->value();
 
         self::assertSame($payload, Schematic::serialize($registry));
     }
@@ -129,8 +129,8 @@ final class SchemaDirectedSerializationTest extends TestCase
      */
     public function testAUnionMemberIsBuiltAsTheBranchItsPrimitivesMatch(): void
     {
-        $registry = Schematic::instanciate(Either::class, ['held' => ['entries' => [], 'names' => []]])->value();
-        $slug = Schematic::instanciate(Either::class, ['held' => 'a-slug'])->value();
+        $registry = Schematic::instantiate(Either::class, ['held' => ['entries' => [], 'names' => []]])->value();
+        $slug = Schematic::instantiate(Either::class, ['held' => 'a-slug'])->value();
 
         self::assertInstanceOf(Either::class, $registry);
         self::assertInstanceOf(Either::class, $slug);

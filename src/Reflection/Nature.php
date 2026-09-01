@@ -46,13 +46,13 @@ enum Nature
 
     /**
      * What the schema says, or `null` where it makes no structural claim at all — which is what
-     * {@see \Neos\Schematic\Instantiation\Unbuildable} refuses.
+     * {@see \Neos\Schematic\Instantiation\UnbuildableInstantiator} refuses.
      *
      * **Building asks this and nothing else**, of the schema the class itself owns: `Nature::fromSchema($className::schema())`.
      * There is no fallback to the class there — a class whose published contract claims nothing has told the
      * engine nothing, and a link that knows what it is builds it instead. Nor does this ever answer
      * {@see self::Enum}: an enum publishes the schema of its *cases*, so it reads `Scalar`, and
-     * {@see \Neos\Schematic\Instantiation\EnumCase} asks the class directly and is asked first.
+     * {@see \Neos\Schematic\Instantiation\EnumCaseInstantiator} asks the class directly and is asked first.
      *
      * A nullable member is unwrapped to what it wraps first ({@see Nullable::unwrap()}), since a member that may
      * be absent is still that member. A union of several substantive branches is answered when they *agree* —

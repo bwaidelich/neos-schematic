@@ -6,12 +6,12 @@ namespace Neos\Schematic;
 
 use Neos\JsonSchema\ProvidesSchema;
 use Neos\JsonSchema\Schema;
-use Neos\Schematic\Instantiation\EnumCase;
+use Neos\Schematic\Instantiation\EnumCaseInstantiator;
 use Neos\Schematic\Instantiation\Instantiator;
-use Neos\Schematic\Instantiation\ListOfItems;
-use Neos\Schematic\Instantiation\NamedShape;
-use Neos\Schematic\Instantiation\ScalarValue;
-use Neos\Schematic\Instantiation\Unbuildable;
+use Neos\Schematic\Instantiation\ListOfItemsInstantiator;
+use Neos\Schematic\Instantiation\NamedShapeInstantiator;
+use Neos\Schematic\Instantiation\ScalarValueInstantiator;
+use Neos\Schematic\Instantiation\UnbuildableInstantiator;
 use Neos\Schematic\Serialization\Serializer;
 
 /**
@@ -25,7 +25,7 @@ use Neos\Schematic\Serialization\Serializer;
  *
  *         public static function fromString(string $value): self
  *         {
- *             return Schematic::instanciate(self::class, $value)->valueOrThrow();
+ *             return Schematic::instantiate(self::class, $value)->valueOrThrow();
  *         }
  *
  *         public static function schema(): Schema
@@ -38,7 +38,7 @@ use Neos\Schematic\Serialization\Serializer;
  * **Input is JSON decoded to associative arrays** – `json_decode($json, true)`.
  *
  * **Validation happens on the one path that produces an instance**, which is what makes a value object valid
- * however it was built: {@see self::instanciate()} validates the whole payload against the class's own schema
+ * however it was built: {@see self::instantiate()} validates the whole payload against the class's own schema
  * before constructing anything, so that one bad request reports every issue in it at once instead of the first one
  * as an exception. A leaf is validated *there*, in that one pass, because a class's schema embeds the schemas of
  * everything it contains — so the engine below this line builds and never judges. The one thing that escapes it is
@@ -60,26 +60,34 @@ final class Schematic
      *
      * Returns a result rather than throwing: every issue in the payload at once, with its paths, which is what a
      * caller handling input from outside wants. A named constructor, which has no half-built value object to hand
-     * back, reads the same result with {@see InstanciationResult::valueOrThrow()}.
+     * back, reads the same result with {@see InstantiationResult::valueOrThrow()}.
      *
      * Safe to call from the class's own named constructor.
      *
      * @template T of ProvidesSchema
      * @param class-string<T> $className
-     * @return InstanciationResult<T>
+     * @return InstantiationResult<T>
      */
-    #[\NoDiscard('inspect the InstanciationResult; discarding it drops the instanciation outcome')]
-    public static function instanciate(string $className, mixed $input): InstanciationResult
+    #[\NoDiscard('inspect the InstantiationResult; discarding it drops the instantiation outcome')]
+    public static function instantiate(string $className, mixed $input): InstantiationResult
     {
         $result = $className::schema()->validate($input);
         if (!$result->valid) {
-            return InstanciationResult::failed($className, $result->issues);
+            return InstantiationResult::failed($className, $result->issues);
         }
         // the chain, in the order it is asked: the specific kinds first, the general shape last, and a refusal
         // for what none of them claimed. A client wanting a kind of its own builds this chain with a link of its
         // own in front and calls it directly — there is nothing here for it to register with.
-        $instantiator = new EnumCase(new ScalarValue(new ListOfItems(new NamedShape(new Unbuildable()))));
-        return InstanciationResult::built($instantiator->build($className, $input, $instantiator));
+        $instantiator = new EnumCaseInstantiator(
+            new ScalarValueInstantiator(
+                new ListOfItemsInstantiator(
+                    new NamedShapeInstantiator(
+                        new UnbuildableInstantiator(),
+                    ),
+                ),
+            ),
+        );
+        return InstantiationResult::built($instantiator->build($className, $input, $instantiator));
     }
 
     /**

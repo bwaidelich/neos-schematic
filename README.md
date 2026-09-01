@@ -14,7 +14,7 @@ Schematic is **a bridge between PHP classes and JSON Schema**. A type owns its s
   * [Installation](#installation)
   * [Quick start](#quick-start)
   * [AutoDiscoveringSchema](#autodiscoveringschema)
-  * [Instanciation of objects](#instanciation-of-objects)
+  * [Instantiation of objects](#instantiation-of-objects)
     * [why we recommend private constructors](#why-we-recommend-private-constructors)
     * [Recommended: Classes validating themselves via static `fromXY` methods](#recommended-classes-validating-themselves-via-static-fromxy-methods)
     * [Custom instantiation with Instantiator Chains](#custom-instantiation-with-instantiator-chains)
@@ -78,7 +78,7 @@ final readonly class Post implements ProvidesSchema
     }
 }
 
-$result = Schematic::instanciate(Post::class, ['slug' => 'hello-world', 'author' => 'Ada', 'text' => 'Hi']);
+$result = Schematic::instantiate(Post::class, ['slug' => 'hello-world', 'author' => 'Ada', 'text' => 'Hi']);
 
 assert($result->success === true);
 assert($result->value() instanceof Post);
@@ -142,18 +142,18 @@ assert(json_encode(Draft::schema()) === '{"type":"object","properties":'
     . '"additionalProperties":false,"required":["status","title"]}');
 ```
 
-## Instanciation of objects
+## Instantiation of objects
 
-`Schematic::instanciate()` validates first using the JSON schema of the target class, then builds the object.
+`Schematic::instantiate()` validates first using the JSON schema of the target class, then builds the object.
 
-* if the payload is valid: an `InstanciationResult` carrying the instance as `->value()`;
+* if the payload is valid: an `InstantiationResult` carrying the instance as `->value()`;
 * if it is invalid: the same result with `->success === false`, and every issue in the payload at once, each at its own path.
 
 ```php
 // ... Slug and Post from the quick start
 use Neos\Schematic\Schematic;
 
-$result = Schematic::instanciate(Post::class, ['slug' => 'Hello World', 'author' => 'Ada']);
+$result = Schematic::instantiate(Post::class, ['slug' => 'Hello World', 'author' => 'Ada']);
 
 assert($result->success === false);
 assert(array_map(fn($issue) => $issue->pathAsString(), $result->issues->toArray()) === ['slug', 'text']);
@@ -176,7 +176,7 @@ A class implementing `ProvidesSchema` has its `__construct()` called with the va
 
 ### Recommended: Classes validating themselves via static `fromXY` methods
 
-A named static factory method is how another instanciator can create instances. There we recommend
+A named static factory method is how another instantiator can create instances. There we recommend
 to use the schema for validation before construction:
 
 ```php
@@ -217,7 +217,7 @@ Remember, **Schematic never calls `from*()` methods.** It constructs directly, s
 
 ### Custom instantiation with Instantiator Chains
 
-Instanciation runs through a chain of `Instantiator` objects, each handling one kind of data, and passing on everything else
+Instantiation runs through a chain of `Instantiator` objects, each handling one kind of data, and passing on everything else
 to the next instantiator.
 
 ```php (no test)
@@ -232,14 +232,22 @@ interface Instantiator
 }
 ```
 
-`Schematic::instanciate()` wires the built-in Instantiators together:
+`Schematic::instantiate()` wires the built-in Instantiators together:
 
 ```php (no test)
-new EnumCase(new ScalarValue(new ListOfItems(new NamedShape(new Unbuildable()))))
+new EnumCaseInstantiator(
+    new ScalarValueInstantiator(
+        new ListOfItemsInstantiator(
+            new NamedShapeInstantiator(
+                new UnbuildableInstantiator(),
+            ),
+        ),
+    ),
+)
 ```
 
 - the most specific instantiators should be at the start of the chain; the most generic more towards the end.
-- at the very end, `Unbuildable` throws an error.
+- at the very end, `UnbuildableInstantiator` throws an error.
 
 - `$root` must be the whole chain, handed to every link, so descending into a member
   can start at the full chain again.
@@ -255,12 +263,12 @@ use Neos\JsonSchema\ProvidesSchema;
 use Neos\JsonSchema\Schema;
 use Neos\JsonSchema\StringSchema;
 use Neos\JsonSchema\Support\ObjectProperties;
-use Neos\Schematic\Instantiation\EnumCase;
+use Neos\Schematic\Instantiation\EnumCaseInstantiator;
 use Neos\Schematic\Instantiation\Instantiator;
-use Neos\Schematic\Instantiation\ListOfItems;
-use Neos\Schematic\Instantiation\NamedShape;
-use Neos\Schematic\Instantiation\ScalarValue;
-use Neos\Schematic\Instantiation\Unbuildable;
+use Neos\Schematic\Instantiation\ListOfItemsInstantiator;
+use Neos\Schematic\Instantiation\NamedShapeInstantiator;
+use Neos\Schematic\Instantiation\ScalarValueInstantiator;
+use Neos\Schematic\Instantiation\UnbuildableInstantiator;
 use Neos\Schematic\Schematic;
 
 /**
@@ -285,11 +293,11 @@ final readonly class Reference implements ProvidesSchema
 
 $caught = null;
 try {
-    $unreached = Schematic::instanciate(Reference::class, 'dune');
+    $unreached = Schematic::instantiate(Reference::class, 'dune');
 } catch (\LogicException $exception) {
     $caught = $exception->getMessage();
 }
-assert(str_contains((string) $caught, 'could not be built by any Instanciator'));
+assert(str_contains((string) $caught, 'could not be built by any Instantiator'));
 
 
 final readonly class BuildReference implements Instantiator
@@ -306,7 +314,15 @@ final readonly class BuildReference implements Instantiator
 }
 
 $instantiator = new BuildReference(
-    new EnumCase(new ScalarValue(new ListOfItems(new NamedShape(new Unbuildable())))),
+    new EnumCaseInstantiator(
+        new ScalarValueInstantiator(
+            new ListOfItemsInstantiator(
+                new NamedShapeInstantiator(
+                    new UnbuildableInstantiator(),
+                ),
+            ),
+        ),
+    ),
 );
 
 // the engine builds and never judges, so validating is yours — once, against the schema the class owns
@@ -343,15 +359,15 @@ assert($edition->of->id === 'dune');
 assert($edition->year === 1965);
 ```
 
-`NamedShape` built the `Edition`, and descending into its `of` member went back to the top of the chain, where
+`NamedShapeInstantiator` built the `Edition`, and descending into its `of` member went back to the top of the chain, where
 `BuildReference` claimed it.
 
-`Schematic::instanciate()` takes no chain, for now, because we did not figure out yet how we make this extensible in
+`Schematic::instantiate()` takes no chain, for now, because we did not figure out yet how we make this extensible in
 a good way.
 
 ## Serialization of objects
 
-`Schematic::serialize()` takes a value whose class owns a schema — the same thing `instanciate()` takes, which is what
+`Schematic::serialize()` takes a value whose class owns a schema — the same thing `instantiate()` takes, which is what
 makes it the exact inverse. The class drives *extraction*: only it knows an enum's backing value, a value object's
 single member, a collection's items. But PHP's one `array` type covers two JSON structures, so `[]` alone cannot say
 whether it was an empty map or an empty list. The schema can, and that is the one thing it is asked about a *value*
@@ -387,7 +403,7 @@ final readonly class Registry implements ProvidesSchema
     }
 }
 
-$registry = Schematic::instanciate(Registry::class, ['entries' => [], 'names' => []])->value();
+$registry = Schematic::instantiate(Registry::class, ['entries' => [], 'names' => []])->value();
 
 // the empty map is a map and the empty list is a list, because the schema says which is which
 assert(json_encode(Schematic::serialize($registry)) === '{"entries":{},"names":[]}');
@@ -413,7 +429,7 @@ Extraction reads **public properties only**.
 - **Tag-discriminated polymorphism is not built in.** A union member is resolved by *trying* its branches, which is what
   `anyOf` means; a payload whose type is decided by one of its own keys is not that. Reading the tag is a rule only the
   consumer knows, so it belongs in a link of its own — see
-  [Custom instanciation with Instanciator Chains](#custom-instanciation-with-instanciator-chains).
+  [Custom instantiation with Instantiator Chains](#custom-instantiation-with-instantiator-chains).
 - **Serialization reads public properties.** A class with private state writes its own `jsonSerialize()`.
 
 ## License
