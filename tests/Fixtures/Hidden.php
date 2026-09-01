@@ -18,7 +18,7 @@ final readonly class Hidden implements ProvidesSchema
 
     public static function fromString(string $value): self
     {
-        return \Neos\Schematic\Schematic::instantiate(self::class, $value);
+        return \Neos\Schematic\Schematic::instanciate(self::class, $value)->valueOrThrow();
     }
 
     public function reveal(): string

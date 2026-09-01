@@ -20,7 +20,7 @@ use Neos\Schematic\Serialization\Serializer;
  *
  *         public static function fromString(string $value): self
  *         {
- *             return Schematic::instantiate(self::class, $value);
+ *             return Schematic::instanciate(self::class, $value)->valueOrThrow();
  *         }
  *
  *         public static function schema(): Schema
@@ -32,11 +32,11 @@ use Neos\Schematic\Serialization\Serializer;
  *
  * **Input is JSON decoded to associative arrays** – `json_decode($json, true)`.
  *
- * **Validation happens on every path that produces an instance**, which is what makes a value object valid however
- * it was built: {@see self::instantiate()} validates against the class's own schema before constructing, and
- * {@see self::map()} validates the whole payload first so that one bad request reports every issue in it at once.
- * A leaf is therefore validated once per level of nesting above it — accepted deliberately, because the invariant
- * holding everywhere is worth more than the saving.
+ * **Validation happens on the one path that produces an instance**, which is what makes a value object valid
+ * however it was built: {@see self::instanciate()} validates the whole payload against the class's own schema
+ * before constructing anything, so that one bad request reports every issue in it at once instead of the first one
+ * as an exception. A leaf is therefore validated once per level of nesting above it — accepted deliberately,
+ * because the invariant holding everywhere is worth more than the saving.
  *
  * **Construction is the constructor, always.** Whatever a class calls its own way in, the engine builds it by
  * calling `__construct()` with the validated primitives — see {@see Instantiator}. There is no closure to hand
@@ -72,53 +72,35 @@ final class Schematic
     /**
      * Builds an instance, validating the input against the class's own schema first.
      *
-     * Throws rather than returning a result: this is the path a named constructor takes, and a value object that
-     * cannot be built has no half-built form to hand back. Use {@see self::map()} for input from outside.
+     * Returns a result rather than throwing: every issue in the payload at once, with its paths, which is what a
+     * caller handling input from outside wants. A named constructor, which has no half-built value object to hand
+     * back, reads the same result with {@see InstanciationResult::valueOrThrow()}.
      *
      * Safe to call from the class's own named constructor — the engine constructs directly and never calls back
      * into `from*()`, so there is no recursion to avoid, and no closure to hand over for a constructor the class
      * keeps private.
      *
-     * @template T of object
+     * @template T of ProvidesSchema
      * @param class-string<T> $className
-     * @return T
-     * @throws CoercionFailed if the input does not satisfy the class's schema
+     * @return InstanciationResult<T>
      */
-    public static function instantiate(string $className, mixed $input): object
+    #[\NoDiscard('inspect the InstanciationResult; discarding it drops the instanciation outcome')]
+    public static function instanciate(string $className, mixed $input): InstanciationResult
     {
         $schema = self::schemaFor($className);
         $result = $schema->validate($input);
         if (!$result->valid) {
-            throw CoercionFailed::forClass($className, $result->issues);
+            return InstanciationResult::failed($className, $result->issues);
         }
-        return Instantiator::build($className, $input, $schema);
-    }
-
-    /**
-     * The same thing for input arriving from outside: every issue in the payload at once, with its paths, instead
-     * of the first one as an exception.
-     *
-     * A successful result carries the instance as its {@see MappingResult::value()}.
-     *
-     * @param class-string $className
-     */
-    #[\NoDiscard('inspect the MappingResult; discarding it drops the mapping outcome')]
-    public static function map(string $className, mixed $input): MappingResult
-    {
-        $schema = self::schemaFor($className);
-        $result = $schema->validate($input);
-        if (!$result->valid) {
-            return MappingResult::failed($result->issues);
-        }
-        return MappingResult::built(Instantiator::build($className, $input, $schema));
+        return InstanciationResult::built(Instantiator::build($className, $input, $schema));
     }
 
     /**
      * The way back out: an instance read into the primitives its schema describes, ready for `json_encode()`.
      *
-     * **The schema is required**, and it is what makes this the exact inverse of {@see self::map()}. The class
-     * shape drives *extraction* — it alone knows an enum's backing value, a scalar value object's single member,
-     * a collection's `Traversable` — but PHP's one `array` type covers two JSON types, so the class cannot say
+     * **The schema is required**, and it is what makes this the exact inverse of {@see self::instanciate()}. The
+     * class shape drives *extraction* — it alone knows an enum's backing value, a scalar value object's single
+     * member, a collection's `Traversable` — but PHP's one `array` type covers two JSON types, so it cannot say
      * whether `[]` is an empty list or an empty map. Only the schema can, and saying so is the one thing it is
      * consulted for out here — see {@see Serializer}.
      *

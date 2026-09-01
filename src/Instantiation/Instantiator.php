@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Neos\Schematic\Instantiation;
 
 use Neos\JsonSchema\AnySchema;
+use Neos\JsonSchema\ProvidesSchema;
 use Neos\JsonSchema\Schema;
 use Neos\Schematic\Reflection\ClassShape;
 use Neos\Schematic\Reflection\Nature;
+use Neos\Schematic\SchemaNotProvided;
 use Neos\Schematic\Schematic;
 
 /**
@@ -18,7 +20,7 @@ use Neos\Schematic\Schematic;
  * `ProvidesSchema`; from there its `__construct()` is called with the primitives its parameters name — a public
  * one directly, a non-public one through reflection. The engine deliberately does *not* call `from*()` named
  * constructors: a named constructor is how a *caller* writes the class's invariant down, and it in turn calls
- * {@see Schematic::instantiate()}, so calling it from here would validate the same value twice per level of
+ * {@see Schematic::instanciate()}, so calling it from here would validate the same value twice per level of
  * nesting and turn the obvious `fromString()` into unbounded recursion.
  *
  * The consequence, and it is the intended trade: **a rule that lives in a named constructor body rather than in
@@ -26,10 +28,10 @@ use Neos\Schematic\Schematic;
  * invariants generally — the schema is the validator, the constructor is the last word, and anything else is not
  * part of the contract.
  *
- * Descent into a class-typed parameter goes back through {@see Schematic::instantiate()}, so a nested value object
+ * Descent into a class-typed parameter goes back through {@see Schematic::instanciate()}, so a nested value object
  * is validated against *its own* schema. There is no second, construct-only path to keep in step with this one.
  *
- * @internal reached through {@see Schematic::instantiate()}
+ * @internal reached through {@see Schematic::instanciate()}
  */
 final class Instantiator
 {
@@ -99,7 +101,7 @@ final class Instantiator
             $itemType = self::classType($parameters[0] ?? null);
             $items = [];
             foreach ($value as $index => $item) {
-                $items[(string) $index] = $itemType === null ? $item : Schematic::instantiate($itemType, $item);
+                $items[(string) $index] = $itemType === null ? $item : Schematic::instanciate($itemType, $item)->valueOrThrow();
             }
             return $items;
         }
@@ -124,17 +126,26 @@ final class Instantiator
 
     private static function argument(\ReflectionParameter $parameter, mixed $value): mixed
     {
-        $className = self::classType($parameter);
-        if ($className === null || $value === null) {
+        // a null needs no type to build it, so it is answered before the parameter's own type is asked for
+        if ($value === null) {
             return $value;
         }
-        return Schematic::instantiate($className, $value);
+        $className = self::classType($parameter);
+        if ($className === null) {
+            return $value;
+        }
+        return Schematic::instanciate($className, $value)->valueOrThrow();
     }
 
     /**
      * The class a parameter is typed by, or `null` when it is a builtin (`?Foo` counts as `Foo`).
      *
-     * @return class-string|null
+     * A class-typed parameter is a value to be built, and building goes through the class's own schema — so one
+     * that owns none is refused here, in the same terms {@see Schematic::schemaFor()} would refuse it a frame
+     * later. Saying so at this edge is what lets the descent be typed by the opt-in itself.
+     *
+     * @return class-string<ProvidesSchema>|null
+     * @throws SchemaNotProvided if the parameter is typed by a class that provides no schema
      */
     private static function classType(\ReflectionParameter|null $parameter): string|null
     {
@@ -144,6 +155,9 @@ final class Instantiator
         }
         /** @var class-string $name */
         $name = $type->getName();
+        if (!is_a($name, ProvidesSchema::class, true)) {
+            throw SchemaNotProvided::forClass($name);
+        }
         return $name;
     }
 
