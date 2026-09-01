@@ -33,9 +33,11 @@ final readonly class ListOfItems implements Instantiator
         if (!is_array($value)) {
             throw new \LogicException(sprintf('Expected a list to build "%s", got %s', $className, get_debug_type($value)), 1783600403);
         }
-        $itemType = MemberType::of(ClassShape::of($className)->parameters[0] ?? null);
+        $parameter = ClassShape::of($className)->parameters[0] ?? null;
         $items = [];
         foreach ($value as $item) {
+            // asked per item, because a union-typed one is answered by the item itself
+            $itemType = MemberType::of($parameter, $item);
             $items[] = $itemType === null ? $item : $root->build($itemType, $item, $root);
         }
         return Construct::invoke($className, $items);

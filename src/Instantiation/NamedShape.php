@@ -61,7 +61,7 @@ final readonly class NamedShape implements Instantiator
         if ($value === null) {
             return $value;
         }
-        $className = MemberType::of($parameter);
+        $className = MemberType::of($parameter, $value);
         return $className === null ? $value : $root->build($className, $value, $root);
     }
 }

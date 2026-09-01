@@ -407,8 +407,9 @@ Extraction reads **public properties only**.
   `null` are not supported either — they report as nullable to reflection but describe no shape.
 - **Recursive types are rejected**, with a `CircularReferenceException` naming the cycle. A schema embeds its children
   directly, so it cannot represent one.
-- **A union-typed constructor parameter is not built.** The published `anyOf` says which shapes may arrive, but the
-  descent into such a member has no single class to hand on, so its primitives reach the constructor unbuilt.
+- **A union-typed constructor parameter is built by trying its branches.** They are tried in the order they are
+  declared — the order the published `anyOf` lists them — and the first branch whose schema accepts the value is the
+  one it gets built as. Overlapping branches therefore resolve to the first, not the best, match.
 - **Tag-discriminated polymorphism is not built in.** A union member is resolved by *trying* its branches, which is what
   `anyOf` means; a payload whose type is decided by one of its own keys is not that. Reading the tag is a rule only the
   consumer knows, so it belongs in a link of its own — see
