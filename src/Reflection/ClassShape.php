@@ -44,9 +44,7 @@ final readonly class ClassShape
         public string $className,
         public Nature $nature,
         public array  $parameters,
-    )
-    {
-    }
+    ) {}
 
     /**
      * @param class-string $className

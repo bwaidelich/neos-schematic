@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Neos\Schematic\Instantiation;
 
 use Neos\JsonSchema\ProvidesSchema;
-use Neos\Schematic\Reflection\Nature;
 use Neos\Schematic\Schematic;
 
 /**

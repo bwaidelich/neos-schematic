@@ -8,6 +8,7 @@ use Neos\JsonSchema\AnySchema;
 use Neos\JsonSchema\OneOfSchema;
 use Neos\JsonSchema\StringSchema;
 use Neos\Schematic\Schematic;
+use Neos\Schematic\Serialization\Serializer;
 use Neos\Schematic\Tests\Fixtures\Acknowledgement;
 use Neos\Schematic\Tests\Fixtures\Either;
 use Neos\Schematic\Tests\Fixtures\Registry;
@@ -34,7 +35,7 @@ final class SchemaDirectedSerializationTest extends TestCase
         $payload = ['entries' => [], 'names' => []];
 
         $registry = Schematic::instanciate(Registry::class, $payload)->value();
-        $serialized = Schematic::serialize(Registry::schema(), $registry);
+        $serialized = Schematic::serialize($registry);
 
         self::assertSame('{"entries":{},"names":[]}', json_encode($serialized));
     }
@@ -45,7 +46,7 @@ final class SchemaDirectedSerializationTest extends TestCase
 
         $registry = Schematic::instanciate(Registry::class, $payload)->value();
 
-        self::assertSame($payload, Schematic::serialize(Registry::schema(), $registry));
+        self::assertSame($payload, Schematic::serialize($registry));
     }
 
     /**
@@ -58,9 +59,9 @@ final class SchemaDirectedSerializationTest extends TestCase
     {
         self::assertSame(
             ['acknowledged' => true],
-            Schematic::serialize(Acknowledgement::schema(), new Acknowledgement()),
+            Schematic::serialize(new Acknowledgement()),
         );
-        self::assertSame('a-slug', Schematic::serialize(Slug::schema(), Slug::fromString('a-slug')));
+        self::assertSame('a-slug', Schematic::serialize(Slug::fromString('a-slug')));
     }
 
     /**
@@ -75,7 +76,7 @@ final class SchemaDirectedSerializationTest extends TestCase
 
         self::assertSame(
             ['entries' => ['a' => 1], 'names' => ['x']],
-            Schematic::serialize($union, new Registry(['a' => 1], ['x'])),
+            Serializer::serialize(new Registry(['a' => 1], ['x']), $union),
         );
     }
 
@@ -88,7 +89,7 @@ final class SchemaDirectedSerializationTest extends TestCase
     {
         $union = OneOfSchema::create(Registry::schema(), Acknowledgement::schema());
 
-        self::assertSame(['acknowledged' => true], Schematic::serialize($union, new Acknowledgement()));
+        self::assertSame(['acknowledged' => true], Serializer::serialize(new Acknowledgement(), $union));
     }
 
     /**
@@ -98,7 +99,7 @@ final class SchemaDirectedSerializationTest extends TestCase
      */
     public function testKeyOrderIsTheConstructorsAndIsNotAdjustedToTheSchema(): void
     {
-        self::assertSame(['first' => 1, 'second' => 2], Schematic::serialize(Reversed::schema(), new Reversed(1, 2)));
+        self::assertSame(['first' => 1, 'second' => 2], Schematic::serialize(new Reversed(1, 2)));
     }
 
     /**
@@ -107,7 +108,7 @@ final class SchemaDirectedSerializationTest extends TestCase
      */
     public function testAnUnconstrainedSchemaLeavesTheReadingToTheClass(): void
     {
-        self::assertSame('a-slug', Schematic::serialize(AnySchema::create(), Slug::fromString('a-slug')));
+        self::assertSame('a-slug', Serializer::serialize(Slug::fromString('a-slug'), AnySchema::create()));
     }
 
     /**
@@ -119,7 +120,7 @@ final class SchemaDirectedSerializationTest extends TestCase
     {
         $either = new Either(new Registry([], []));
 
-        self::assertSame('{"held":{"entries":{},"names":[]}}', json_encode(Schematic::serialize(Either::schema(), $either)));
+        self::assertSame('{"held":{"entries":{},"names":[]}}', json_encode(Schematic::serialize($either)));
     }
 
     /**
@@ -148,6 +149,6 @@ final class SchemaDirectedSerializationTest extends TestCase
 
         $this->expectException(UnextractableValue::class);
         $this->expectExceptionMessageMatches('/no single structural reading/');
-        self::assertNull(Schematic::serialize($union, Slug::fromString('a-slug')));
+        self::assertNull(Serializer::serialize(Slug::fromString('a-slug'), $union));
     }
 }

@@ -31,7 +31,7 @@ final class EmptyMapOrListTest extends TestCase
 
     public function testAnEmptyArrayUnderAnObjectSchemaIsAMap(): void
     {
-        self::assertSame('{}', json_encode(Serializer::read([], $this->freeFormMap())));
+        self::assertSame('{}', json_encode(Serializer::serialize([], $this->freeFormMap())));
     }
 
     /**
@@ -39,13 +39,13 @@ final class EmptyMapOrListTest extends TestCase
      */
     public function testAnEmptyArrayUnderAnArraySchemaStaysAList(): void
     {
-        self::assertSame('[]', json_encode(Serializer::read([], ArraySchema::create(items: StringSchema::create()))));
+        self::assertSame('[]', json_encode(Serializer::serialize([], ArraySchema::create(items: StringSchema::create()))));
     }
 
     public function testAnEmptyArrayNothingDescribesIsLeftAsItIs(): void
     {
-        self::assertSame('[]', json_encode(Serializer::read([])));
-        self::assertSame('[]', json_encode(Serializer::read([], AllOfSchema::create($this->freeFormMap()))));
+        self::assertSame('[]', json_encode(Serializer::serialize([])));
+        self::assertSame('[]', json_encode(Serializer::serialize([], AllOfSchema::create($this->freeFormMap()))));
     }
 
     public function testAFilledMapKeepsItsMembersInTheOrderTheValueHasThem(): void
@@ -54,7 +54,7 @@ final class EmptyMapOrListTest extends TestCase
             properties: ObjectProperties::create(second: IntegerSchema::create(), first: IntegerSchema::create()),
         );
 
-        self::assertSame(['first' => 1, 'second' => 2], Serializer::read(['first' => 1, 'second' => 2], $schema));
+        self::assertSame(['first' => 1, 'second' => 2], Serializer::serialize(['first' => 1, 'second' => 2], $schema));
     }
 
     /**
@@ -69,7 +69,7 @@ final class EmptyMapOrListTest extends TestCase
             additionalProperties: false,
         );
 
-        self::assertSame(['extra' => 'x', 'declared' => 'y'], Serializer::read(['extra' => 'x', 'declared' => 'y'], $schema));
+        self::assertSame(['extra' => 'x', 'declared' => 'y'], Serializer::serialize(['extra' => 'x', 'declared' => 'y'], $schema));
     }
 
     /**
@@ -78,7 +78,7 @@ final class EmptyMapOrListTest extends TestCase
      */
     public function testMembersOfAFreeFormMapAreNotDecided(): void
     {
-        self::assertSame('{"a":[],"b":["x"]}', json_encode(Serializer::read(['a' => [], 'b' => ['x']], $this->freeFormMap())));
+        self::assertSame('{"a":[],"b":["x"]}', json_encode(Serializer::serialize(['a' => [], 'b' => ['x']], $this->freeFormMap())));
     }
 
     public function testANamedMemberIsDecidedByItsOwnSchema(): void
@@ -87,14 +87,14 @@ final class EmptyMapOrListTest extends TestCase
             properties: ObjectProperties::create(map: $this->freeFormMap(), list: ArraySchema::create(items: StringSchema::create())),
         );
 
-        self::assertSame('{"map":{},"list":[]}', json_encode(Serializer::read(['map' => [], 'list' => []], $schema)));
+        self::assertSame('{"map":{},"list":[]}', json_encode(Serializer::serialize(['map' => [], 'list' => []], $schema)));
     }
 
     public function testItemsOfAListAreDecidedToo(): void
     {
         $schema = ArraySchema::create(items: $this->freeFormMap());
 
-        self::assertSame('[{},{"a":1}]', json_encode(Serializer::read([[], ['a' => 1]], $schema)));
+        self::assertSame('[{},{"a":1}]', json_encode(Serializer::serialize([[], ['a' => 1]], $schema)));
     }
 
     public function testPrefixItemsDescribeTheirPositions(): void
@@ -104,7 +104,7 @@ final class EmptyMapOrListTest extends TestCase
             items: ArraySchema::create(items: StringSchema::create()),
         );
 
-        self::assertSame('[{},[]]', json_encode(Serializer::read([[], []], $schema)));
+        self::assertSame('[{},[]]', json_encode(Serializer::serialize([[], []], $schema)));
     }
 
     /**
@@ -118,7 +118,7 @@ final class EmptyMapOrListTest extends TestCase
             ObjectSchema::create(properties: ObjectProperties::create(list: ArraySchema::create(items: StringSchema::create())), required: ['list']),
         );
 
-        self::assertSame('{"map":{}}', json_encode(Serializer::read(['map' => []], $schema)));
-        self::assertSame('{"list":[]}', json_encode(Serializer::read(['list' => []], $schema)));
+        self::assertSame('{"map":{}}', json_encode(Serializer::serialize(['map' => []], $schema)));
+        self::assertSame('{"list":[]}', json_encode(Serializer::serialize(['list' => []], $schema)));
     }
 }

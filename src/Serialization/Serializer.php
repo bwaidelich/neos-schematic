@@ -18,8 +18,7 @@ use Neos\Schematic\Schematic;
 use Neos\Schematic\UnextractableValue;
 
 /**
- * Reads an instance back into primitives — the mirror of {@see \Neos\Schematic\Instantiation\Instantiator}, and
- * like it driven by the class alone.
+ * Reads an instance back into primitives — the mirror of {@see \Neos\Schematic\Instantiation\Instantiator}.
  *
  * **One thing the class cannot answer, and the schema can.** PHP's one `array` type covers both of JSON's
  * structures, so `[]` alone cannot say whether it was an empty map or an empty list — and neither can the value
@@ -40,16 +39,18 @@ use Neos\Schematic\UnextractableValue;
  * that `jsonSerialize()`. Reflecting past `private` would be the engine deciding a boundary the class drew does
  * not apply to it.
  *
- * @internal reached through {@see Schematic::serialize()}
+ * Reached through {@see Schematic::serialize()} for the common case — a value read under the schema its own class
+ * publishes. This is the way in for the other case: a value read under a schema that is *not* its class's own — a
+ * declared type, a union branch, a member nothing describes — which is what the schema parameter is for.
  */
 final class Serializer
 {
     private function __construct() {}
 
-    public static function read(mixed $value, Schema|null $schema = null): mixed
+    public static function serialize(mixed $value, Schema|null $schema = null): mixed
     {
         if (is_array($value)) {
-            return self::readArray($value, $schema);
+            return self::serializeArray($value, $schema);
         }
         if ($value instanceof \UnitEnum) {
             return $value instanceof \BackedEnum ? $value->value : $value->name;
@@ -62,9 +63,9 @@ final class Serializer
         return match (self::natureOf($schema, $shape, $value::class)) {
             // an enum is handled above, before any reflection
             Nature::Enum => throw new \LogicException(sprintf('"%s" is not an enum instance', $value::class), 1783600501),
-            Nature::Scalar => self::readScalar($value, $shape, $schema),
-            Nature::ListOf => self::readList($value, $shape, $schema),
-            Nature::Shape => self::readShape($value, $shape, $schema),
+            Nature::Scalar => self::serializeScalar($value, $shape, $schema),
+            Nature::ListOf => self::serializeList($value, $shape, $schema),
+            Nature::Shape => self::serializeShape($value, $shape, $schema),
         };
     }
 
@@ -74,7 +75,7 @@ final class Serializer
      *
      * @param array<array-key, mixed> $value
      */
-    private static function readArray(array $value, Schema|null $schema): mixed
+    private static function serializeArray(array $value, Schema|null $schema): mixed
     {
         if ($schema instanceof AnyOfSchema || $schema instanceof OneOfSchema) {
             // an empty array matching both an object branch and a list branch is the very ambiguity being settled
@@ -85,7 +86,7 @@ final class Serializer
             $read = [];
             foreach ($value as $index => $item) {
                 $itemSchema = is_int($index) ? $schema->itemSchema($index) : null;
-                $read[] = self::read($item, $itemSchema instanceof Schema ? $itemSchema : null);
+                $read[] = self::serialize($item, $itemSchema instanceof Schema ? $itemSchema : null);
             }
             return $read;
         }
@@ -96,13 +97,13 @@ final class Serializer
             }
             $read = [];
             foreach ($value as $key => $item) {
-                $read[$key] = self::read($item, is_string($key) ? $schema->properties?->get($key) : null);
+                $read[$key] = self::serialize($item, is_string($key) ? $schema->properties?->get($key) : null);
             }
             return $read;
         }
         // nothing describes these members – a free-form map's values, an `allOf`, no schema at all – so there is
         // nothing here to decide, and guessing is the mistake this avoids
-        return array_map(static fn(mixed $item): mixed => self::read($item), $value);
+        return array_map(static fn(mixed $item): mixed => self::serialize($item), $value);
     }
 
     /**
@@ -178,7 +179,7 @@ final class Serializer
         ), 1783600504);
     }
 
-    private static function readScalar(object $value, ClassShape $shape, Schema|null $schema): mixed
+    private static function serializeScalar(object $value, ClassShape $shape, Schema|null $schema): mixed
     {
         if ($shape->parameters === []) {
             throw new UnextractableValue(sprintf(
@@ -186,19 +187,19 @@ final class Serializer
                 $value::class,
             ), 1783600503);
         }
-        return self::read(self::publicProperty($value, $shape->parameters[0]->getName()), $schema);
+        return self::serialize(self::publicProperty($value, $shape->parameters[0]->getName()), $schema);
     }
 
     /**
      * A collection is read through `Traversable` when it offers one — the class's own answer to "what is in me" —
      * and otherwise from the public property named after its variadic parameter.
      */
-    private static function readList(object $value, ClassShape $shape, Schema|null $schema = null): mixed
+    private static function serializeList(object $value, ClassShape $shape, Schema|null $schema = null): mixed
     {
         $itemSchema = $schema instanceof ArraySchema ? $schema->itemSchema(0) : null;
         $items = $itemSchema instanceof Schema ? $itemSchema : null;
         if ($value instanceof \Traversable) {
-            return array_values(array_map(static fn(mixed $item): mixed => self::read($item, $items), iterator_to_array($value)));
+            return array_values(array_map(static fn(mixed $item): mixed => self::serialize($item, $items), iterator_to_array($value)));
         }
         $name = $shape->parameters[0]->getName();
         $held = self::publicProperty($value, $name, sprintf(
@@ -213,7 +214,7 @@ final class Serializer
                 get_debug_type($held),
             ), 1783600502);
         }
-        return array_values(array_map(static fn(mixed $item): mixed => self::read($item, $items), $held));
+        return array_values(array_map(static fn(mixed $item): mixed => self::serialize($item, $items), $held));
     }
 
     /**
@@ -227,7 +228,7 @@ final class Serializer
      *
      * @return array<string, mixed>|\stdClass
      */
-    private static function readShape(object $value, ClassShape $shape, Schema|null $schema = null): array|\stdClass
+    private static function serializeShape(object $value, ClassShape $shape, Schema|null $schema = null): array|\stdClass
     {
         $properties = $schema instanceof ObjectSchema ? $schema->properties : null;
         if ($properties !== null) {
@@ -236,7 +237,7 @@ final class Serializer
         $result = [];
         foreach ($shape->parameters as $parameter) {
             $name = $parameter->getName();
-            $result[$name] = self::read(self::publicProperty($value, $name), $properties?->get($name));
+            $result[$name] = self::serialize(self::publicProperty($value, $name), $properties?->get($name));
         }
         // a class holding no state at all is still an object, and `[]` would go out as a list
         return $result === [] ? new \stdClass() : $result;
