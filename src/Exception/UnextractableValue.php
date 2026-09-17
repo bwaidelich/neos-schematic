@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Neos\Schematic;
+namespace Neos\Schematic\Exception;
 
 /**
  * Thrown when an instance does not expose the state its class shape describes — a constructor parameter with no

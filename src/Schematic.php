@@ -6,6 +6,7 @@ namespace Neos\Schematic;
 
 use Neos\JsonSchema\ProvidesSchema;
 use Neos\JsonSchema\Schema;
+use Neos\Schematic\Exception\UnextractableValue;
 use Neos\Schematic\Instantiation\EnumCaseInstantiator;
 use Neos\Schematic\Instantiation\Instantiator;
 use Neos\Schematic\Instantiation\ListOfItemsInstantiator;

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Neos\Schematic;
+namespace Neos\Schematic\Exception;
 
 use Neos\JsonSchema\Validation\Issues;
 
@@ -15,7 +15,7 @@ use Neos\JsonSchema\Validation\Issues;
  * The result {@see Schematic::instantiate()} returns covers the other case: a whole payload arriving from outside,
  * where every issue in it is wanted at once rather than the first one as an exception.
  */
-final class CoercionFailed extends \RuntimeException
+final class InstantiationFailed extends \RuntimeException
 {
     private function __construct(
         string $message,

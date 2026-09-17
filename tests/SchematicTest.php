@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Neos\Schematic\Tests;
 
 use Neos\JsonSchema\Validation\IssueCode;
-use Neos\Schematic\CoercionFailed;
+use Neos\Schematic\InstantiationFailed;
 use Neos\Schematic\Schematic;
 use Neos\Schematic\Tests\Fixtures\Adopting;
 use Neos\Schematic\Tests\Fixtures\Author;
@@ -28,7 +28,7 @@ use PHPUnit\Framework\TestCase;
  * back out.
  */
 #[CoversClass(Schematic::class)]
-#[CoversClass(CoercionFailed::class)]
+#[CoversClass(InstantiationFailed::class)]
 #[CoversClass(\Neos\Schematic\Instantiation\EnumCaseInstantiator::class)]
 #[CoversClass(\Neos\Schematic\Instantiation\ScalarValueInstantiator::class)]
 #[CoversClass(\Neos\Schematic\Instantiation\ListOfItemsInstantiator::class)]
@@ -105,7 +105,7 @@ final class SchematicTest extends TestCase
      */
     public function testReachingAPrivateConstructorStillValidates(): void
     {
-        $this->expectException(CoercionFailed::class);
+        $this->expectException(InstantiationFailed::class);
         Schematic::instantiate(Slug::class, 'Hello World')->valueOrThrow();
     }
 
@@ -133,7 +133,7 @@ final class SchematicTest extends TestCase
      */
     public function testANamedConstructorEnforcesTheClassSchema(): void
     {
-        $this->expectException(CoercionFailed::class);
+        $this->expectException(InstantiationFailed::class);
         $this->expectExceptionMessageMatches('/does not match the pattern/');
         Slug::fromString('Hello World');
     }
@@ -143,7 +143,7 @@ final class SchematicTest extends TestCase
         try {
             Slug::fromString('');
             self::fail('expected the construction to fail');
-        } catch (CoercionFailed $exception) {
+        } catch (InstantiationFailed $exception) {
             self::assertSame([IssueCode::TooShort->value], $exception->issues->codes());
         }
     }

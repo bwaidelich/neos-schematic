@@ -14,7 +14,7 @@ use Neos\Schematic\Tests\Fixtures\Either;
 use Neos\Schematic\Tests\Fixtures\Registry;
 use Neos\Schematic\Tests\Fixtures\Reversed;
 use Neos\Schematic\Tests\Fixtures\Slug;
-use Neos\Schematic\UnextractableValue;
+use Neos\Schematic\Exception\UnextractableValue;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 

@@ -16,7 +16,7 @@ use Neos\Schematic\Tests\Fixtures\Status;
 use Neos\Schematic\Tests\Fixtures\Tag;
 use Neos\Schematic\Tests\Fixtures\TagList;
 use Neos\Schematic\Tests\Fixtures\Tags;
-use Neos\Schematic\UnextractableValue;
+use Neos\Schematic\Exception\UnextractableValue;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 

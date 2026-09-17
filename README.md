@@ -47,7 +47,8 @@ final readonly class Slug implements ProvidesSchema
     // we suggest a PRIVATE constructor because this way, the value is already validated.
     private function __construct(public string $value) {}
 
-    // OPTIONAL:
+    // OPTIONAL public factory - not used by Schematic; only needed if you manually need to construct objects:
+    //
     // We suggest that the validation happens in the static factory method,
     // using the existing schema.
     public static function fromString(string $value): self
@@ -66,7 +67,7 @@ final readonly class Slug implements ProvidesSchema
 final readonly class Post implements ProvidesSchema
 {
     // both private and public constructors are supported here.
-    private function __construct(
+    public function __construct(
         public Slug $slug,
         public string $author,
         public string $text,
@@ -162,7 +163,7 @@ assert(array_map(fn($issue) => $issue->pathAsString(), $result->issues->toArray(
 assert($result->issues->codes() === ['invalid_pattern', 'required']);
 ```
 
-A caller with no use for a failed outcome reads that same result with `->valueOrThrow()`, and gets a `CoercionFailed`
+A caller with no use for a failed outcome reads that same result with `->valueOrThrow()`, and gets a `InstantiationFailed`
 carrying those issues.
 
 One consequence of validating once: a **hand-written** `schema()` describing a member more loosely than the member's own

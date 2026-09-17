@@ -6,6 +6,7 @@ namespace Neos\Schematic;
 
 use Neos\JsonSchema\ProvidesSchema;
 use Neos\JsonSchema\Validation\Issues;
+use Neos\Schematic\Exception\InstantiationFailed;
 
 /**
  * The outcome of {@see Schematic::instantiate()}: *either* the instance that was built, *or* every reason why the
@@ -71,12 +72,12 @@ final readonly class InstantiationResult
      * invariant, where the input is the caller's own and a bad one is a bug rather than a report to render.
      *
      * @return T
-     * @throws CoercionFailed if the instantiation failed
+     * @throws InstantiationFailed if the instantiation failed
      */
     public function valueOrThrow(): object
     {
         if (!$this->success || $this->value === null) {
-            throw CoercionFailed::forClass($this->className, $this->issues);
+            throw InstantiationFailed::forClass($this->className, $this->issues);
         }
         return $this->value;
     }
