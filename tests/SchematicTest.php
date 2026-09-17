@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Neos\Schematic\Tests;
 
 use Neos\JsonSchema\Validation\IssueCode;
-use Neos\Schematic\InstantiationFailed;
+use Neos\Schematic\Exception\InstantiationFailed;
 use Neos\Schematic\Schematic;
 use Neos\Schematic\Tests\Fixtures\Adopting;
 use Neos\Schematic\Tests\Fixtures\Author;

@@ -12,10 +12,10 @@ use Neos\JsonSchema\OneOfSchema;
 use Neos\JsonSchema\ProvidesSchema;
 use Neos\JsonSchema\Schema;
 use Neos\JsonSchema\Support\ObjectProperties;
+use Neos\Schematic\Exception\UnextractableValue;
 use Neos\Schematic\Reflection\ClassShape;
 use Neos\Schematic\Reflection\Nature;
 use Neos\Schematic\Schematic;
-use Neos\Schematic\Exception\UnextractableValue;
 
 /**
  * Reads an instance back into primitives — the mirror of {@see \Neos\Schematic\Instantiation\Instantiator}.

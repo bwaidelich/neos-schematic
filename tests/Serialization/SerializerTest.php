@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Neos\Schematic\Tests\Serialization;
 
 use Neos\JsonSchema\ArraySchema;
+use Neos\Schematic\Exception\UnextractableValue;
 use Neos\Schematic\Schematic;
 use Neos\Schematic\Serialization\Serializer;
 use Neos\Schematic\Tests\Fixtures\Channel;
@@ -16,7 +17,6 @@ use Neos\Schematic\Tests\Fixtures\Status;
 use Neos\Schematic\Tests\Fixtures\Tag;
 use Neos\Schematic\Tests\Fixtures\TagList;
 use Neos\Schematic\Tests\Fixtures\Tags;
-use Neos\Schematic\Exception\UnextractableValue;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 

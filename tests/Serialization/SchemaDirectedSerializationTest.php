@@ -7,6 +7,7 @@ namespace Neos\Schematic\Tests\Serialization;
 use Neos\JsonSchema\AnySchema;
 use Neos\JsonSchema\OneOfSchema;
 use Neos\JsonSchema\StringSchema;
+use Neos\Schematic\Exception\UnextractableValue;
 use Neos\Schematic\Schematic;
 use Neos\Schematic\Serialization\Serializer;
 use Neos\Schematic\Tests\Fixtures\Acknowledgement;
@@ -14,7 +15,6 @@ use Neos\Schematic\Tests\Fixtures\Either;
 use Neos\Schematic\Tests\Fixtures\Registry;
 use Neos\Schematic\Tests\Fixtures\Reversed;
 use Neos\Schematic\Tests\Fixtures\Slug;
-use Neos\Schematic\Exception\UnextractableValue;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
