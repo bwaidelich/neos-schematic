@@ -234,4 +234,14 @@ final class AutoDiscoveringSchemaTest extends TestCase
         $this->expectExceptionMessageMatches('/"\$either" cannot carry a description/');
         AutoDiscoveringSchema::analyze(DescribedUnion::class);
     }
+
+    /**
+     * PHP applies an attribute on a promoted parameter to the property too, and reflecting that property has to work
+     */
+    public function testADescriptionOnAPromotedParameterCanBeInstantiatedFromTheProperty(): void
+    {
+        $attribute = (new \ReflectionProperty(DescribedPost::class, 'author'))->getAttributes(Description::class)[0];
+
+        self::assertSame('Who wrote it', $attribute->newInstance()->value);
+    }
 }
