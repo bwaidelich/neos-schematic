@@ -39,8 +39,10 @@ use Neos\Schematic\Reflection\Nature;
  * A member typed as a **union** of several types becomes an `anyOf` over their schemas — a value that may be one
  * of several shapes, described where it appears the same way a union *return* type is described in a document.
  *
- * There are no attributes to read: a constraint that does not follow from the type is written in the class's own
- * `schema()`, which is the whole point — the published schema and the enforced rule are one object.
+ * The one attribute it reads is {@see Description}, because a description is an annotation rather than a rule: it
+ * tells a reader what a member *means*, which no type can say, and changes nothing about which values pass. A
+ * constraint that does not follow from the type is still written in the class's own `schema()`, which is the whole
+ * point — the published schema and the enforced rule are one object.
  */
 final class AutoDiscoveringSchema
 {
@@ -57,7 +59,7 @@ final class AutoDiscoveringSchema
         }
         $path[] = $className;
         $shape = ClassShape::of($className);
-        return match ($shape->nature) {
+        $schema = match ($shape->nature) {
             // is_subclass_of() rather than the ClassShape nature alone, because it narrows the class-string
             Nature::Enum => is_subclass_of($className, \UnitEnum::class)
                 ? self::enum($className)
@@ -66,6 +68,7 @@ final class AutoDiscoveringSchema
             Nature::ListOf => ArraySchema::create(items: self::parameterSchema($shape->parameters[0], $path)),
             Nature::Shape => self::shape($shape, $path),
         };
+        return self::describe($schema, new \ReflectionClass($className), sprintf('class "%s"', $className));
     }
 
     /**
@@ -155,7 +158,7 @@ final class AutoDiscoveringSchema
         if (!$type instanceof \ReflectionNamedType) {
             throw UnsupportedTypeException::because(sprintf('Unsupported type for parameter "$%s" (a named type or a union of them)', $parameter->getName()));
         }
-        $schema = self::namedTypeSchema($type, $parameter, $path);
+        $schema = self::describe(self::namedTypeSchema($type, $parameter, $path), $parameter, sprintf('parameter "$%s"', $parameter->getName()));
         // `?Foo` and `Foo|null` are the same thing to reflection (both a ReflectionNamedType that allowsNull()), so
         // this one check covers both spellings; a union of two substantive branches is a ReflectionUnionType.
         return $type->allowsNull() ? Nullable::wrap($schema) : $schema;
@@ -186,7 +189,49 @@ final class AutoDiscoveringSchema
         if (count($branches) < 2) {
             throw UnsupportedTypeException::because(sprintf('The union type of parameter "$%s" has fewer than two substantive branches', $parameter->getName()));
         }
+        if ($parameter->getAttributes(Description::class) !== []) {
+            throw UnsupportedTypeException::because(sprintf('The union type of parameter "$%s" cannot carry a description: an `anyOf` has no `description` of its own', $parameter->getName()));
+        }
         return $type->allowsNull() ? Nullable::wrap(AnyOfSchema::create(...$branches)) : AnyOfSchema::create(...$branches);
+    }
+
+    /**
+     * The schema with the {@see Description} of the class or parameter it was derived for, if there is one.
+     *
+     * A nullable schema is described on its substantive branch, which is what a reader looks at to learn what the
+     * member is. Anything else that has no `description` of its own — a genuine union, a `$ref` — fails loud rather
+     * than dropping the description the class asked for.
+     *
+     * @param \ReflectionClass<object>|\ReflectionParameter $subject
+     */
+    private static function describe(Schema $schema, \ReflectionClass|\ReflectionParameter $subject, string $subjectLabel): Schema
+    {
+        $attributes = $subject->getAttributes(Description::class);
+        if ($attributes === []) {
+            return $schema;
+        }
+        return self::withDescription($schema, $attributes[0]->newInstance()->value)
+            ?? throw UnsupportedTypeException::because(sprintf('The %s cannot carry a description: its schema has no `description` of its own', $subjectLabel));
+    }
+
+    private static function withDescription(Schema $schema, string $description): Schema|null
+    {
+        if (
+            $schema instanceof StringSchema
+            || $schema instanceof IntegerSchema
+            || $schema instanceof NumberSchema
+            || $schema instanceof BooleanSchema
+            || $schema instanceof ArraySchema
+            || $schema instanceof ObjectSchema
+        ) {
+            return $schema->with(description: $description);
+        }
+        $substantive = Nullable::unwrap($schema);
+        if ($substantive === $schema) {
+            return null;
+        }
+        $described = self::withDescription($substantive, $description);
+        return $described === null ? null : Nullable::wrap($described);
     }
 
     /**

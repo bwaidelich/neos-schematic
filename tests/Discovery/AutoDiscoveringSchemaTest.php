@@ -6,8 +6,13 @@ namespace Neos\Schematic\Tests\Discovery;
 
 use Neos\Schematic\Discovery\AutoDiscoveringSchema;
 use Neos\Schematic\Discovery\CircularReferenceException;
+use Neos\Schematic\Discovery\Description;
 use Neos\Schematic\Discovery\UnsupportedTypeException;
 use Neos\Schematic\Tests\Discovery\Fixtures\Channel;
+use Neos\Schematic\Tests\Discovery\Fixtures\DescribedPost;
+use Neos\Schematic\Tests\Discovery\Fixtures\DescribedStatus;
+use Neos\Schematic\Tests\Discovery\Fixtures\DescribedTags;
+use Neos\Schematic\Tests\Discovery\Fixtures\DescribedUnion;
 use Neos\Schematic\Tests\Discovery\Fixtures\GenuineUnion;
 use Neos\Schematic\Tests\Discovery\Fixtures\MutuallyRecursiveA;
 use Neos\Schematic\Tests\Discovery\Fixtures\Nothing;
@@ -25,11 +30,13 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Analysis reads a class and emits **pure** JSON Schema — no wrapper, no attributes, no codec.
+ * Analysis reads a class and emits **pure** JSON Schema — no wrapper, no codec, and no attribute but
+ * {@see Description}, which annotates and never constrains.
  */
 #[CoversClass(AutoDiscoveringSchema::class)]
 #[CoversClass(UnsupportedTypeException::class)]
 #[CoversClass(CircularReferenceException::class)]
+#[CoversClass(Description::class)]
 final class AutoDiscoveringSchemaTest extends TestCase
 {
     /**
@@ -163,5 +170,68 @@ final class AutoDiscoveringSchemaTest extends TestCase
         $this->expectException(CircularReferenceException::class);
         $this->expectExceptionMessageMatches('/MutuallyRecursiveA -> .*MutuallyRecursiveB -> .*MutuallyRecursiveA/');
         AutoDiscoveringSchema::analyze(MutuallyRecursiveA::class);
+    }
+
+    public function testADescribedClassIsDescribed(): void
+    {
+        self::assertSame('A blog post', $this->encoded(DescribedPost::class)['description']);
+        self::assertSame(['type' => 'string', 'description' => 'Whether the post is visible', 'enum' => ['draft', 'published']], $this->encoded(DescribedStatus::class));
+    }
+
+    public function testADescribedParameterIsDescribed(): void
+    {
+        $properties = (array) $this->encoded(DescribedPost::class)['properties'];
+
+        self::assertSame(['type' => 'string', 'description' => 'Who wrote it'], $properties['author']);
+        self::assertSame(['type' => 'string'], $properties['body']);
+    }
+
+    /**
+     * The parameter says what the member means *here*, which is more specific than what its type says in general.
+     */
+    public function testAParameterDescriptionReplacesTheOneOfItsType(): void
+    {
+        $properties = (array) $this->encoded(DescribedPost::class)['properties'];
+
+        // assertEquals, because where the description lands among Slug's own keywords is not the point here
+        self::assertEquals(
+            [...(array) json_decode((string) json_encode(Slug::schema()), true), 'description' => 'The address of the post'],
+            $properties['slug'],
+        );
+    }
+
+    public function testAnUndescribedParameterKeepsTheDescriptionOfItsType(): void
+    {
+        $properties = (array) $this->encoded(DescribedPost::class)['properties'];
+
+        self::assertSame(['type' => 'string', 'description' => 'Whether the post is visible', 'enum' => ['draft', 'published']], $properties['status']);
+    }
+
+    /**
+     * The null branch only says the member may be absent; what it *is* is told on the substantive one.
+     */
+    public function testANullableParameterIsDescribedOnItsSubstantiveBranch(): void
+    {
+        $properties = (array) $this->encoded(DescribedPost::class)['properties'];
+
+        self::assertSame(
+            ['anyOf' => [['type' => 'string', 'description' => 'Shown below the title'], ['type' => 'null']]],
+            $properties['subtitle'],
+        );
+    }
+
+    public function testAVariadicParameterDescribesTheItemsAndTheClassTheList(): void
+    {
+        self::assertSame(
+            ['type' => 'array', 'description' => 'Keywords of a post', 'items' => ['type' => 'string', 'description' => 'One keyword']],
+            $this->encoded(DescribedTags::class),
+        );
+    }
+
+    public function testADescribedUnionIsRejected(): void
+    {
+        $this->expectException(UnsupportedTypeException::class);
+        $this->expectExceptionMessageMatches('/"\$either" cannot carry a description/');
+        AutoDiscoveringSchema::analyze(DescribedUnion::class);
     }
 }

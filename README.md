@@ -14,6 +14,7 @@ Schematic is **a bridge between PHP classes and JSON Schema**. A type owns its s
   * [Installation](#installation)
   * [Quick start](#quick-start)
   * [AutoDiscoveringSchema](#autodiscoveringschema)
+    * [Descriptions](#descriptions)
   * [Instantiation of objects](#instantiation-of-objects)
     * [why we recommend private constructors](#why-we-recommend-private-constructors)
     * [Recommended: Classes validating themselves via static `fromXY` methods](#recommended-classes-validating-themselves-via-static-fromxy-methods)
@@ -115,6 +116,7 @@ Extras:
 - A nested type implementing `ProvidesSchema` contributes *its own* `schema()`
 - `?T` adds a null branch
 - `A|B` (Union Types): becomes an `anyOf` over them.
+- `#[Description]` on the class or a parameter becomes the schema's `description` (see [below](#descriptions)).
 
 ```php
 // ... 
@@ -143,6 +145,43 @@ assert(json_encode(Draft::schema()) === '{"type":"object","properties":'
     . '{"status":{"type":"string","enum":["draft","published"]},"title":{"type":"string"},'
     . '"subtitle":{"anyOf":[{"type":"string"},{"type":"null"}]}},'
     . '"additionalProperties":false,"required":["status","title"]}');
+```
+
+### Descriptions
+
+A type cannot say what a member *means*, so `#[Description]` can: on a class (or enum) it describes the schema of
+that type, on a constructor parameter the schema of that member. It is the one attribute `AutoDiscoveringSchema`
+reads, because it only annotates — which values are accepted does not change.
+
+A parameter's description replaces the one of its type, since it is the more specific of the two. A nullable member is
+described on its substantive branch.
+
+```php
+// ...
+use Neos\Schematic\Discovery\Description;
+
+#[Description('A comment on a post')]
+final readonly class Comment implements ProvidesSchema
+{
+    public function __construct(
+        #[Description('What the commenter wrote, as plain text')]
+        public string $text,
+        #[Description('Set once the comment was approved by a moderator')]
+        public Status|null $status = null,
+    ) {}
+
+    public static function schema(): Schema
+    {
+        static $schema = null;
+        return $schema ??= AutoDiscoveringSchema::analyze(self::class);
+    }
+}
+
+assert(json_encode(Comment::schema()) === '{"type":"object","description":"A comment on a post","properties":'
+    . '{"text":{"type":"string","description":"What the commenter wrote, as plain text"},'
+    . '"status":{"anyOf":[{"type":"string","description":"Set once the comment was approved by a moderator",'
+    . '"enum":["draft","published"]},{"type":"null"}]}},'
+    . '"additionalProperties":false,"required":["text"]}');
 ```
 
 ## Instantiation of objects
@@ -573,6 +612,8 @@ And three things to keep in mind:
 
 - **Constructor parameters must be named types, or a union of them.** Intersections are rejected. `mixed` and a bare
   `null` are not supported either — they report as nullable to reflection but describe no shape.
+- **A union-typed parameter cannot carry a `#[Description]`.** An `anyOf` has no `description` of its own, so
+  analysis rejects it rather than drop the description silently.
 - **Recursive types are rejected**, with a `CircularReferenceException` naming the cycle. A schema embeds its children
   directly, so it cannot represent one.
 - **A union-typed constructor parameter is built by trying its branches.** They are tried in the order they are
