@@ -174,7 +174,7 @@ carrying those issues.
 * a class implementing `ProvidesSchema`: its own `schema()`;
 * otherwise, if anyone may call its constructor — it is public, there is none, or the class is an enum: the schema
   `AutoDiscoveringSchema::analyze()` derives, computed once per class and process;
-* otherwise, a class with a **private constructor and no schema is refused** with a `LogicException`. A private
+* otherwise, a class with a **private constructor and no schema is refused** with an `UnsupportedTypeException`. A private
   constructor guards a way in of its own (a `fromString()` checking a pattern, say) that analysis cannot see, and the
   engine calling that constructor would bypass it. Such a class implements `ProvidesSchema` — even if only to return
   `AutoDiscoveringSchema::analyze(self::class)`, which is how it says "my constructor is all there is".

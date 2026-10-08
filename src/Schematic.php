@@ -82,9 +82,9 @@ final class Schematic
      * A custom {@see Instantiator} link asks this, too, rather than calling `schema()` itself.
      *
      * @param class-string $className
-     * @throws \LogicException if the class provides no schema and its constructor is not public
-     * @throws UnsupportedTypeException|CircularReferenceException if the class cannot be described — a
-     *     programming error, never a reaction to input
+     * @throws UnsupportedTypeException|CircularReferenceException if the class cannot be described — including a
+     *     class that provides no schema and whose constructor is not public; a programming error, never a reaction
+     *     to input
      */
     public static function schemaOf(string $className): Schema
     {
@@ -95,7 +95,7 @@ final class Schematic
             return self::$derived[$className];
         }
         if (!ClassShape::of($className)->publiclyConstructible) {
-            throw new \LogicException(AutoDiscoveringSchema::notDescribable($className), 1783600413);
+            throw UnsupportedTypeException::notDescribable($className);
         }
         return self::$derived[$className] = AutoDiscoveringSchema::analyze($className);
     }

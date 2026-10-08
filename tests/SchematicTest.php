@@ -68,14 +68,14 @@ final class SchematicTest extends TestCase
      */
     public function testAClassWithoutASchemaAndWithAPrivateConstructorIsRefused(): void
     {
-        $this->expectException(\LogicException::class);
+        $this->expectException(UnsupportedTypeException::class);
         $this->expectExceptionMessageMatches('/provides no schema and its constructor is not public/');
         $unreached = Schematic::instantiate(WithoutSchemaWithPrivateConstructor::class, 'anything');
     }
 
     public function testTheRefusalReachesTheDescentIntoAMember(): void
     {
-        $this->expectException(\LogicException::class);
+        $this->expectException(UnsupportedTypeException::class);
         $this->expectExceptionMessageMatches('/provides no schema and its constructor is not public/');
         // the result is never produced: the call throws before it can return one
         $unreached = Schematic::instantiate(Adopting::class, ['held' => ['value' => 'anything']]);

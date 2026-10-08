@@ -84,25 +84,9 @@ final class AutoDiscoveringSchema
             return $className::schema();
         }
         if (!ClassShape::of($className)->publiclyConstructible) {
-            throw UnsupportedTypeException::because(self::notDescribable($className));
+            throw UnsupportedTypeException::notDescribable($className);
         }
         return self::analyze($className, $path);
-    }
-
-    /**
-     * Why a class owning no schema is not described on its behalf — shared with
-     * {@see \Neos\Schematic\Schematic::schemaOf()}, so the refusal reads the same wherever it is raised.
-     *
-     * @internal
-     */
-    public static function notDescribable(string $className): string
-    {
-        return sprintf(
-            '"%s" provides no schema and its constructor is not public, so describing it from that constructor would '
-            . 'bypass whatever its own way in enforces — implement %s',
-            $className,
-            ProvidesSchema::class,
-        );
     }
 
     /**
