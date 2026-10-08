@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Neos\Schematic\Tests\Discovery;
 
+use Neos\JsonSchema\ObjectSchema;
 use Neos\Schematic\Discovery\AutoDiscoveringSchema;
 use Neos\Schematic\Discovery\CircularReferenceException;
 use Neos\Schematic\Discovery\UnsupportedTypeException;
@@ -22,6 +23,7 @@ use Neos\Schematic\Tests\Discovery\Fixtures\Title;
 use Neos\Schematic\Tests\Discovery\Fixtures\Titles;
 use Neos\Schematic\Tests\Discovery\Fixtures\Untyped;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -163,5 +165,55 @@ final class AutoDiscoveringSchemaTest extends TestCase
         $this->expectException(CircularReferenceException::class);
         $this->expectExceptionMessageMatches('/MutuallyRecursiveA -> .*MutuallyRecursiveB -> .*MutuallyRecursiveA/');
         AutoDiscoveringSchema::analyze(MutuallyRecursiveA::class);
+    }
+
+    public function testAnalyzeShapeHandsBackTheObjectSchemaOfAShape(): void
+    {
+        $schema = AutoDiscoveringSchema::analyzeShape(Post::class);
+
+        self::assertInstanceOf(ObjectSchema::class, $schema);
+        self::assertSame(json_encode(AutoDiscoveringSchema::analyze(Post::class)), json_encode($schema));
+    }
+
+    public function testAnalyzeShapeCanBeDescribedExplicitly(): void
+    {
+        $schema = AutoDiscoveringSchema::analyzeShape(PostWithNullableSlug::class)
+            ->with(description: 'A post')
+            ->withPropertyDescriptions(slug: 'The address of the post');
+
+        self::assertSame(
+            '{"type":"object","description":"A post","properties":{"slug":{"anyOf":[{"type":"string","description":"The address of the post",'
+            . '"minLength":1,"maxLength":100,"pattern":"^[a-z0-9-]+$"},{"type":"null"}]}},"additionalProperties":false,"required":["slug"]}',
+            json_encode($schema),
+        );
+    }
+
+    /**
+     * @return iterable<string, array{class-string}>
+     */
+    public static function classesThatAreNoShape(): iterable
+    {
+        yield 'enum' => [Status::class];
+        yield 'scalar' => [Title::class];
+        yield 'list' => [Titles::class];
+    }
+
+    /**
+     * @param class-string $className
+     */
+    #[DataProvider('classesThatAreNoShape')]
+    public function testAnalyzeShapeRejectsAClassThatIsNoShape(string $className): void
+    {
+        $this->expectException(UnsupportedTypeException::class);
+        $this->expectExceptionMessage('is not a shape');
+
+        AutoDiscoveringSchema::analyzeShape($className);
+    }
+
+    public function testAnalyzeShapeStillRejectsASelfReferencingType(): void
+    {
+        $this->expectException(CircularReferenceException::class);
+
+        AutoDiscoveringSchema::analyzeShape(SelfReferencing::class);
     }
 }

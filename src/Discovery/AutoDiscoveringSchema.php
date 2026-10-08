@@ -40,7 +40,9 @@ use Neos\Schematic\Reflection\Nature;
  * of several shapes, described where it appears the same way a union *return* type is described in a document.
  *
  * There are no attributes to read: a constraint that does not follow from the type is written in the class's own
- * `schema()`, which is the whole point — the published schema and the enforced rule are one object.
+ * `schema()`, which is the whole point — the published schema and the enforced rule are one object. That includes
+ * what no type can say, a member's *meaning*: {@see self::analyzeShape()} hands back the `object` schema, so the class
+ * can describe itself and its members explicitly via `with(description: …)` and `withPropertyDescriptions(…)`.
  */
 final class AutoDiscoveringSchema
 {
@@ -66,6 +68,25 @@ final class AutoDiscoveringSchema
             Nature::ListOf => ArraySchema::create(items: self::parameterSchema($shape->parameters[0], $path)),
             Nature::Shape => self::shape($shape, $path),
         };
+    }
+
+    /**
+     * {@see self::analyze()} for a class that is a {@see Nature::Shape}, typed as the `object` schema it derives, so
+     * the caller can refine it without narrowing a `Schema` first:
+     *
+     * `AutoDiscoveringSchema::analyzeShape(self::class)->withPropertyDescriptions(title: 'As printed on the cover')`
+     *
+     * Any other class (an enum, a single scalar, a variadic list) is rejected, since it derives no `object` schema.
+     *
+     * @param class-string $className
+     */
+    public static function analyzeShape(string $className): ObjectSchema
+    {
+        $shape = ClassShape::of($className);
+        if ($shape->nature !== Nature::Shape) {
+            throw UnsupportedTypeException::because(sprintf('"%s" is not a shape but of nature %s, so it derives no object schema', $className, $shape->nature->name));
+        }
+        return self::shape($shape, [$className]);
     }
 
     /**
@@ -125,7 +146,7 @@ final class AutoDiscoveringSchema
     /**
      * @param list<class-string> $path
      */
-    private static function shape(ClassShape $shape, array $path): Schema
+    private static function shape(ClassShape $shape, array $path): ObjectSchema
     {
         $properties = [];
         $required = [];
