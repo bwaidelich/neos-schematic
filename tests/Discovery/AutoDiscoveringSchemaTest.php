@@ -9,12 +9,14 @@ use Neos\Schematic\Discovery\CircularReferenceException;
 use Neos\Schematic\Discovery\UnsupportedTypeException;
 use Neos\Schematic\Tests\Discovery\Fixtures\Channel;
 use Neos\Schematic\Tests\Discovery\Fixtures\GenuineUnion;
+use Neos\Schematic\Tests\Discovery\Fixtures\HoldsSealed;
 use Neos\Schematic\Tests\Discovery\Fixtures\MutuallyRecursiveA;
 use Neos\Schematic\Tests\Discovery\Fixtures\Nothing;
 use Neos\Schematic\Tests\Discovery\Fixtures\Post;
 use Neos\Schematic\Tests\Discovery\Fixtures\PostWithDefaults;
 use Neos\Schematic\Tests\Discovery\Fixtures\PostWithNullableSlug;
 use Neos\Schematic\Tests\Discovery\Fixtures\Priority;
+use Neos\Schematic\Tests\Discovery\Fixtures\Sealed;
 use Neos\Schematic\Tests\Discovery\Fixtures\SelfReferencing;
 use Neos\Schematic\Tests\Discovery\Fixtures\Slug;
 use Neos\Schematic\Tests\Discovery\Fixtures\Status;
@@ -142,6 +144,26 @@ final class AutoDiscoveringSchemaTest extends TestCase
             . '"additionalProperties":false,"required":["either"]}',
             json_encode(AutoDiscoveringSchema::analyze(GenuineUnion::class)),
         );
+    }
+
+    /**
+     * A nested class owning no schema is analyzed on its behalf only if anyone could call its constructor anyway;
+     * a private one guards a way in of its own that analysis cannot see.
+     */
+    public function testANestedTypeWithoutASchemaAndWithAPrivateConstructorIsRejected(): void
+    {
+        $this->expectException(UnsupportedTypeException::class);
+        $this->expectExceptionMessageMatches('/Sealed" provides no schema and its constructor is not public/');
+        AutoDiscoveringSchema::analyze(HoldsSealed::class);
+    }
+
+    /**
+     * The class being analyzed is exempt: asking for its analysis is how a class with a private constructor
+     * describes *itself* from its own `schema()`.
+     */
+    public function testTheAnalyzedClassItselfMayHaveAPrivateConstructor(): void
+    {
+        self::assertSame(['type' => 'string'], $this->encoded(Sealed::class));
     }
 
     public function testABuiltinThatIsNotAScalarIsRejected(): void

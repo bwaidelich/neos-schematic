@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace Neos\Schematic\Discovery;
 
+use Neos\JsonSchema\ProvidesSchema;
+
 /**
  * Thrown when a class describes no schema that can be derived from it — an enum with no cases, a genuine union or
- * intersection type, `mixed`, or a builtin that is not one of the four JSON scalars.
+ * intersection type, `mixed`, a builtin that is not one of the four JSON scalars, or a class with neither a schema
+ * nor a public constructor.
  *
  * It is always a *generation*-time failure, i.e. a programming error, never a reaction to input.
  */
@@ -15,5 +18,18 @@ final class UnsupportedTypeException extends \RuntimeException
     public static function because(string $message): self
     {
         return new self($message, 1783600301);
+    }
+
+    /**
+     * @param class-string $className
+     */
+    public static function notDescribable(string $className): self
+    {
+        return new self(sprintf(
+            '"%s" provides no schema and its constructor is not public, so describing it from that constructor would '
+            . 'bypass whatever its own way in enforces — implement %s',
+            $className,
+            ProvidesSchema::class,
+        ), 1783600303);
     }
 }

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Neos\Schematic\Instantiation;
 
-use Neos\JsonSchema\ProvidesSchema;
 use Neos\Schematic\Schematic;
 
 /**
@@ -30,8 +29,8 @@ use Neos\Schematic\Schematic;
 interface Instantiator
 {
     /**
-     * @template T of ProvidesSchema
-     * @param class-string<T> $className a class owning a schema — {@see \Neos\JsonSchema\ProvidesSchema}
+     * @template T of object
+     * @param class-string<T> $className a class with a schema, its own or a derived one — {@see Schematic::schemaOf()}
      * @param mixed $value primitives that already satisfy that schema
      * @param Instantiator $root the whole chain, for descending into members
      * @return T

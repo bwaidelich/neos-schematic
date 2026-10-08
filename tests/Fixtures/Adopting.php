@@ -18,7 +18,7 @@ use Neos\JsonSchema\Support\ObjectProperties;
  */
 final readonly class Adopting implements ProvidesSchema
 {
-    public function __construct(public WithoutSchema $held) {}
+    public function __construct(public WithoutSchemaWithPrivateConstructor $held) {}
 
     public static function schema(): Schema
     {

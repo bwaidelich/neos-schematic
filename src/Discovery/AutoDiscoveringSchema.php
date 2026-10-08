@@ -33,8 +33,11 @@ use Neos\Schematic\Reflection\Nature;
  * | Shape  | an `object` of its parameters, `additionalProperties: false`               |
  *
  * A nested type that implements {@see ProvidesSchema} contributes *its own* `schema()` verbatim; anything else is
- * analyzed in turn. Embedding rather than referencing is what makes the outer validation pass enforce the inner
- * class's invariants too, so one pass over a payload reports every issue in it.
+ * analyzed in turn — if anyone could call its constructor anyway. A nested class with a private constructor and no
+ * schema guards a way in of its own that analysis cannot see, so it is rejected rather than described (the class
+ * being analyzed is exempt: that is how a class with a private constructor describes itself from its `schema()`).
+ * Embedding rather than referencing is what makes the outer validation pass enforce the inner class's invariants
+ * too, so one pass over a payload reports every issue in it.
  *
  * A member typed as a **union** of several types becomes an `anyOf` over their schemas — a value that may be one
  * of several shapes, described where it appears the same way a union *return* type is described in a document.
@@ -69,7 +72,8 @@ final class AutoDiscoveringSchema
     }
 
     /**
-     * The schema of a type as it appears *inside* another one: its own if it provides one, an analysis otherwise.
+     * The schema of a type as it appears *inside* another one: its own if it provides one, an analysis if it may be
+     * analyzed on its behalf — the same rule {@see \Neos\Schematic\Schematic::schemaOf()} applies.
      *
      * @param class-string $className
      * @param list<class-string> $path
@@ -78,6 +82,9 @@ final class AutoDiscoveringSchema
     {
         if (is_a($className, ProvidesSchema::class, true)) {
             return $className::schema();
+        }
+        if (!ClassShape::of($className)->publiclyConstructible) {
+            throw UnsupportedTypeException::notDescribable($className);
         }
         return self::analyze($className, $path);
     }

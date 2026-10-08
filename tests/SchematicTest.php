@@ -5,11 +5,18 @@ declare(strict_types=1);
 namespace Neos\Schematic\Tests;
 
 use Neos\JsonSchema\Validation\IssueCode;
+use Neos\Schematic\Discovery\AutoDiscoveringSchema;
+use Neos\Schematic\Discovery\UnsupportedTypeException;
 use Neos\Schematic\Exception\InstantiationFailed;
 use Neos\Schematic\Schematic;
+use Neos\Schematic\Tests\Discovery\Fixtures\Status as DiscoveredStatus;
+use Neos\Schematic\Tests\Discovery\Fixtures\Untyped;
 use Neos\Schematic\Tests\Fixtures\Adopting;
+use Neos\Schematic\Tests\Fixtures\Article;
+use Neos\Schematic\Tests\Fixtures\ArticleOrSlug;
 use Neos\Schematic\Tests\Fixtures\Author;
 use Neos\Schematic\Tests\Fixtures\Channel;
+use Neos\Schematic\Tests\Fixtures\Feature;
 use Neos\Schematic\Tests\Fixtures\Forgetful;
 use Neos\Schematic\Tests\Fixtures\Hidden;
 use Neos\Schematic\Tests\Fixtures\Post;
@@ -20,6 +27,7 @@ use Neos\Schematic\Tests\Fixtures\Status;
 use Neos\Schematic\Tests\Fixtures\Tag;
 use Neos\Schematic\Tests\Fixtures\Tags;
 use Neos\Schematic\Tests\Fixtures\Trapped;
+use Neos\Schematic\Tests\Fixtures\WithoutSchemaWithPrivateConstructor;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
@@ -36,6 +44,7 @@ use PHPUnit\Framework\TestCase;
 #[CoversClass(\Neos\Schematic\Instantiation\UnbuildableInstantiator::class)]
 #[CoversClass(\Neos\Schematic\Instantiation\Helper\Construct::class)]
 #[CoversClass(\Neos\Schematic\Instantiation\Helper\MemberType::class)]
+#[CoversClass(\Neos\Schematic\Serialization\Serializer::class)]
 final class SchematicTest extends TestCase
 {
     /**
@@ -53,23 +62,113 @@ final class SchematicTest extends TestCase
     }
 
     /**
-     * A class that provides no schema cannot be *named* to the facade at all: `instantiate()` takes a
-     * `class-string<ProvidesSchema>`, so writing one down is a type error rather than something to report at
-     * runtime. Where a class name arrives untyped there is nothing to read it off but reflection, and the descent
-     * into a member is the one such place — refused there, in the terms that say what to implement.
+     * A class that provides no schema *and* keeps its constructor private has a way in of its own that analysis
+     * cannot see, so it is not described on its behalf — refused, in the terms that say what to implement, at the
+     * top as well as on the descent into a member.
      */
+    public function testAClassWithoutASchemaAndWithAPrivateConstructorIsRefused(): void
+    {
+        $this->expectException(UnsupportedTypeException::class);
+        $this->expectExceptionMessageMatches('/provides no schema and its constructor is not public/');
+        $unreached = Schematic::instantiate(WithoutSchemaWithPrivateConstructor::class, 'anything');
+    }
+
     public function testTheRefusalReachesTheDescentIntoAMember(): void
     {
-        $this->expectException(\LogicException::class);
-        $this->expectExceptionMessageMatches('/provides no schema, so there is nothing to build it against/');
+        $this->expectException(UnsupportedTypeException::class);
+        $this->expectExceptionMessageMatches('/provides no schema and its constructor is not public/');
         // the result is never produced: the call throws before it can return one
         $unreached = Schematic::instantiate(Adopting::class, ['held' => ['value' => 'anything']]);
     }
 
     /**
+     * A plain record — public constructor, no `schema()` — is described by analyzing it, and that derived schema
+     * is what the payload is validated against and what the record is built by.
+     */
+    public function testARecordWithoutASchemaIsBuiltAgainstItsDerivedSchema(): void
+    {
+        $article = Schematic::instantiate(Article::class, ['slug' => 'hello-world', 'title' => 'Hello'])->valueOrThrow();
+
+        self::assertEquals(new Article(Slug::fromString('hello-world'), 'Hello'), $article);
+    }
+
+    /**
+     * The derived schema embeds the schemas of the members that own one, so one pass still reports every issue.
+     */
+    public function testARecordWithoutASchemaIsValidatedIncludingItsMembers(): void
+    {
+        $result = Schematic::instantiate(Article::class, ['slug' => 'Hello World', 'title' => 'Hello', 'extra' => true]);
+
+        self::assertFalse($result->success);
+        self::assertSame(['slug', '<root>'], array_map(static fn($issue): string => $issue->pathAsString(), $result->issues->toArray()));
+    }
+
+    public function testANestedRecordWithoutASchemaIsBuiltToo(): void
+    {
+        $feature = Schematic::instantiate(Feature::class, [
+            'article' => ['slug' => 'hello-world', 'title' => 'Hello', 'subtitle' => 'World'],
+            'tags' => ['php'],
+            'status' => 'draft',
+        ])->valueOrThrow();
+
+        self::assertEquals(new Article(Slug::fromString('hello-world'), 'Hello', 'World'), $feature->article);
+        self::assertSame(['php'], array_map(static fn(Tag $tag): string => $tag->value, $feature->tags->tags));
+        self::assertSame(Status::draft, $feature->status);
+    }
+
+    public function testAUnionBranchWithoutASchemaIsChosenByItsDerivedSchema(): void
+    {
+        $asArticle = Schematic::instantiate(ArticleOrSlug::class, ['held' => ['slug' => 'hello-world', 'title' => 'Hello']])->valueOrThrow();
+        $asSlug = Schematic::instantiate(ArticleOrSlug::class, ['held' => 'hello-world'])->valueOrThrow();
+
+        self::assertInstanceOf(Article::class, $asArticle->held);
+        self::assertEquals(Slug::fromString('hello-world'), $asSlug->held);
+    }
+
+    public function testAnEnumWithoutASchemaIsResolvedToo(): void
+    {
+        self::assertSame(DiscoveredStatus::published, Schematic::instantiate(DiscoveredStatus::class, 'published')->valueOrThrow());
+    }
+
+    /**
+     * A record that cannot be described is a programming error, not bad input — so it throws rather than being
+     * reported as an issue of the payload.
+     */
+    public function testARecordThatCannotBeDescribedThrows(): void
+    {
+        $this->expectException(UnsupportedTypeException::class);
+        $unreached = Schematic::instantiate(Untyped::class, ['anything' => []]);
+    }
+
+    public function testTheSchemaOfAClassProvidingOneIsItsOwn(): void
+    {
+        self::assertSame(Slug::schema(), Schematic::schemaOf(Slug::class));
+    }
+
+    /**
+     * Analysis depends on nothing but the class, so it is done once per class and process.
+     */
+    public function testTheSchemaOfAClassWithoutOneIsDerivedOnce(): void
+    {
+        self::assertEquals(AutoDiscoveringSchema::analyze(Article::class), Schematic::schemaOf(Article::class));
+        self::assertSame(Schematic::schemaOf(Article::class), Schematic::schemaOf(Article::class));
+    }
+
+    public function testARecordWithoutASchemaRoundTrips(): void
+    {
+        $payload = [
+            'article' => ['slug' => 'hello-world', 'title' => 'Hello', 'subtitle' => null],
+            'tags' => ['php'],
+            'status' => 'draft',
+        ];
+
+        self::assertSame($payload, Schematic::serialize(Schematic::instantiate(Feature::class, $payload)->valueOrThrow()));
+    }
+
+    /**
      * A schema is class-level and immutable, so building it once is worth doing — and it is the class's own
      * business, said with a `static` in `schema()`. `Slug` does; `Forgetful` deliberately does not, and is asked
-     * again every time. Nothing here holds a schema on a class's behalf.
+     * again every time. Only a schema derived on a class's behalf is held for it.
      */
     public function testAClassDecidesForItselfWhetherItsSchemaIsBuiltOnce(): void
     {
@@ -82,6 +181,8 @@ final class SchematicTest extends TestCase
         self::assertNotSame($first, $second);
         self::assertEquals($first, $second);
         self::assertSame(2, Forgetful::$calls);
+        Schematic::schemaOf(Forgetful::class);
+        self::assertSame(3, Forgetful::$calls);
     }
 
     public function testANamedConstructorReachesItsOwnPrivateConstructor(): void

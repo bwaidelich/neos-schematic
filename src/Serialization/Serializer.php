@@ -112,10 +112,10 @@ final class Serializer
      * A union has to be narrowed to one branch before its members mean anything — which branch a value's empty
      * array sits under is what says whether it goes out as `{}` or `[]`. For primitives that question is settled
      * by validating them ({@see self::branchFor()}), but an instance is not primitives yet, and asking the class
-     * is both cheaper and exact: a type published in a `oneOf` puts *its own* schema in there, so the branch that
-     * is its schema is the branch it is.
+     * is both cheaper and exact: a type published in a `oneOf` puts *its* schema in there — its own, or the one
+     * derived on its behalf ({@see Schematic::schemaOf()}) — so the branch that is its schema is the branch it is.
      *
-     * A class publishing no schema, or one no branch carries, leaves the union as it was — {@see self::natureOf()}
+     * A class that has no schema, or one no branch carries, leaves the union as it was — {@see self::natureOf()}
      * then answers from it if the branches agree on their kind, and refuses if they do not.
      *
      * @param class-string $className
@@ -125,10 +125,10 @@ final class Serializer
         if (!$schema instanceof AnyOfSchema && !$schema instanceof OneOfSchema) {
             return $schema;
         }
-        if (!is_a($className, ProvidesSchema::class, true)) {
+        if (!is_a($className, ProvidesSchema::class, true) && !ClassShape::of($className)->publiclyConstructible) {
             return $schema;
         }
-        $published = $className::schema();
+        $published = Schematic::schemaOf($className);
         foreach ($schema as $branch) {
             // identity first: a class memoizes its schema, so the branch usually *is* the very same object
             if ($branch === $published || $branch == $published) {

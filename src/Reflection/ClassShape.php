@@ -12,9 +12,9 @@ namespace Neos\Schematic\Reflection;
  * {@see \Neos\Schematic\Discovery\AutoDiscoveringSchema}, which derives a schema *from* a class and so has none
  * to consult. {@see \Neos\Schematic\Serialization\Serializer} prefers the published schema and falls back to
  * this reading where that schema abstains — a declared type may be `AnySchema` or absent, and then the class is
- * the only source left. Going *in* there is no such gap: the schema is the class's own, so
- * {@see Nature::fromSchema()} reads that schema and stops there, and this reading is used only for the
- * parameters it names.
+ * the only source left. Going *in* there is no such gap: every class built has a schema
+ * ({@see \Neos\Schematic\Schematic::schemaOf()}), so {@see Nature::fromSchema()} reads that schema and stops
+ * there, and this reading is used only for the parameters it names.
  *
  * The nature is decided from the class alone, in this order, which makes it unambiguous:
  *
@@ -39,11 +39,13 @@ final readonly class ClassShape
     /**
      * @param class-string $className
      * @param list<\ReflectionParameter> $parameters
+     * @param bool $publiclyConstructible true for enums and classes with a public or no constructor
      */
     private function __construct(
         public string $className,
         public Nature $nature,
         public array  $parameters,
+        public bool   $publiclyConstructible,
     ) {}
 
     /**
@@ -56,13 +58,14 @@ final readonly class ClassShape
         }
         $reflectionClass = new \ReflectionClass($className);
         if ($reflectionClass->isEnum()) {
-            return new self($className, Nature::Enum, []);
+            return new self($className, Nature::Enum, [], true);
         }
         if ($reflectionClass->isInterface() || $reflectionClass->isAbstract()) {
             throw new \InvalidArgumentException(sprintf('"%s" cannot be instantiated, so it has no shape of its own', $className), 1783600202);
         }
-        $parameters = $reflectionClass->getConstructor()?->getParameters() ?? [];
-        return new self($className, self::natureOf($parameters), $parameters);
+        $constructor = $reflectionClass->getConstructor();
+        $parameters = $constructor?->getParameters() ?? [];
+        return new self($className, self::natureOf($parameters), $parameters, $constructor?->isPublic() ?? true);
     }
 
     public function parameter(string $name): \ReflectionParameter|null

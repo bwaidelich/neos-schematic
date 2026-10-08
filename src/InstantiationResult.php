@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Neos\Schematic;
 
-use Neos\JsonSchema\ProvidesSchema;
 use Neos\JsonSchema\Validation\Issues;
 use Neos\Schematic\Exception\InstantiationFailed;
 
@@ -17,7 +16,7 @@ use Neos\Schematic\Exception\InstantiationFailed;
  * the issues; a named constructor, where there is no half-built value object to hand back, takes
  * {@see self::valueOrThrow()} and is done with it.
  *
- * @template T of ProvidesSchema
+ * @template T of object
  */
 final readonly class InstantiationResult
 {
@@ -33,7 +32,7 @@ final readonly class InstantiationResult
     ) {}
 
     /**
-     * @template V of ProvidesSchema
+     * @template V of object
      * @param V $value
      * @return self<V>
      */
@@ -43,7 +42,7 @@ final readonly class InstantiationResult
     }
 
     /**
-     * @template V of ProvidesSchema
+     * @template V of object
      * @param class-string<V> $className
      * @return self<V>
      */

@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace Neos\Schematic\Instantiation;
 
-use Neos\JsonSchema\ProvidesSchema;
 use Neos\Schematic\Instantiation\Helper\Construct;
 use Neos\Schematic\Instantiation\Helper\MemberType;
 use Neos\Schematic\Reflection\ClassShape;
 use Neos\Schematic\Reflection\Nature;
+use Neos\Schematic\Schematic;
 
 /**
  * Anything with named members, built by passing them as *named* arguments so that declaration order stops
@@ -23,13 +23,13 @@ final readonly class NamedShapeInstantiator implements Instantiator
     public function __construct(private Instantiator $next) {}
 
     /**
-     * @template T of ProvidesSchema
+     * @template T of object
      * @param class-string<T> $className
      * @return T
      */
     public function build(string $className, mixed $value, Instantiator $root): object
     {
-        if (Nature::fromSchema($className::schema()) !== Nature::Shape) {
+        if (Nature::fromSchema(Schematic::schemaOf($className)) !== Nature::Shape) {
             return $this->next->build($className, $value, $root);
         }
         if (!is_array($value)) {

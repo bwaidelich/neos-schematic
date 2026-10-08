@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Neos\Schematic\Instantiation\Helper;
 
-use Neos\JsonSchema\ProvidesSchema;
+use Neos\Schematic\Schematic;
 
 /**
  * @internal
@@ -21,11 +21,10 @@ final class MemberType
      * declared, which is the order the published `anyOf` lists them, and the first one whose schema accepts the
      * primitives is the branch it gets built as.
      *
-     * Reflection is the one place a class name arrives with nothing to vouch for it, so this is where owning a
-     * schema is established rather than assumed — everything downstream takes a `class-string<ProvidesSchema>`
-     * and has nothing left to ask.
+     * Whether the class has a schema — its own, or one derived on its behalf — is {@see Schematic::schemaOf()}'s
+     * to say, and it refuses there a class that has neither.
      *
-     * @return class-string<ProvidesSchema>|null
+     * @return class-string|null
      */
     public static function of(\ReflectionParameter|null $parameter, mixed $value): string|null
     {
@@ -36,11 +35,13 @@ final class MemberType
         if (!$type instanceof \ReflectionNamedType || $type->isBuiltin()) {
             return null;
         }
-        return self::described($type->getName(), $parameter);
+        /** @var class-string $className */
+        $className = $type->getName();
+        return $className;
     }
 
     /**
-     * @return class-string<ProvidesSchema>|null
+     * @return class-string|null
      */
     private static function branch(\ReflectionUnionType $type, \ReflectionParameter $parameter, mixed $value): string|null
     {
@@ -49,28 +50,12 @@ final class MemberType
                 // a builtin branch describes no shape to build, so it is the primitive standing for itself
                 continue;
             }
-            $className = self::described($branch->getName(), $parameter);
-            if ($className::schema()->validate($value)->valid) {
+            /** @var class-string $className */
+            $className = $branch->getName();
+            if (Schematic::schemaOf($className)->validate($value)->valid) {
                 return $className;
             }
         }
         return null;
-    }
-
-    /**
-     * @return class-string<ProvidesSchema>
-     */
-    private static function described(string $className, \ReflectionParameter $parameter): string
-    {
-        if (!is_a($className, ProvidesSchema::class, true)) {
-            throw new \LogicException(sprintf(
-                'Cannot build the member "$%s" typed "%s": it provides no schema, so there is nothing to build it '
-                . 'against — implement %s',
-                $parameter->getName(),
-                $className,
-                ProvidesSchema::class,
-            ), 1783600413);
-        }
-        return $className;
     }
 }
