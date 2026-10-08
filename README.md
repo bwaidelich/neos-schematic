@@ -14,6 +14,7 @@ Schematic is **a bridge between PHP classes and JSON Schema**. A type owns its s
   * [Installation](#installation)
   * [Quick start](#quick-start)
   * [AutoDiscoveringSchema](#autodiscoveringschema)
+    * [Descriptions](#descriptions)
   * [Instantiation of objects](#instantiation-of-objects)
     * [why we recommend private constructors](#why-we-recommend-private-constructors)
     * [Recommended: Classes validating themselves via static `fromXY` methods](#recommended-classes-validating-themselves-via-static-fromxy-methods)
@@ -115,6 +116,7 @@ Extras:
 - A nested type implementing `ProvidesSchema` contributes *its own* `schema()`
 - `?T` adds a null branch
 - `A|B` (Union Types): becomes an `anyOf` over them.
+- Descriptions are added explicitly via `analyzeShape()` (see [below](#descriptions)).
 
 ```php
 // ... 
@@ -144,6 +146,44 @@ assert(json_encode(Draft::schema()) === '{"type":"object","properties":'
     . '"subtitle":{"anyOf":[{"type":"string"},{"type":"null"}]}},'
     . '"additionalProperties":false,"required":["status","title"]}');
 ```
+
+### Descriptions
+
+A type cannot say what a member *means*, so descriptions are added explicitly. `AutoDiscoveringSchema::analyzeShape()`
+is `analyze()` for a class that derives an `object` schema, typed as such. Its `with(description: …)` describes the
+class, `withPropertyDescriptions(…)` its members:
+
+```php
+// ...
+final readonly class Comment implements ProvidesSchema
+{
+    public function __construct(
+        public string $text,
+        public Status|null $status = null,
+    ) {}
+
+    public static function schema(): Schema
+    {
+        static $schema = null;
+        return $schema ??= AutoDiscoveringSchema::analyzeShape(self::class)
+            ->with(description: 'A comment on a post')
+            ->withPropertyDescriptions(
+                text: 'What the commenter wrote, as plain text',
+                status: 'Set once the comment was approved by a moderator',
+            );
+    }
+}
+
+assert(json_encode(Comment::schema()) === '{"type":"object","description":"A comment on a post","properties":'
+    . '{"text":{"type":"string","description":"What the commenter wrote, as plain text"},'
+    . '"status":{"anyOf":[{"type":"string","description":"Set once the comment was approved by a moderator",'
+    . '"enum":["draft","published"]},{"type":"null"}]}},'
+    . '"additionalProperties":false,"required":["text"]}');
+```
+
+A property description replaces the one of the member's type, since it is the more specific of the two. A nullable
+member is described on its substantive branch. A genuine union has no `description` of its own, so describing one is
+rejected rather than dropped silently, and so is a name the class has no member for.
 
 ## Instantiation of objects
 
