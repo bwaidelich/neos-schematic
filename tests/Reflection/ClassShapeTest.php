@@ -8,6 +8,7 @@ use Neos\Schematic\Reflection\ClassShape;
 use Neos\Schematic\Reflection\Nature;
 use Neos\Schematic\Tests\Discovery\Fixtures\Channel;
 use Neos\Schematic\Tests\Discovery\Fixtures\Post;
+use Neos\Schematic\Tests\Discovery\Fixtures\Sealed;
 use Neos\Schematic\Tests\Discovery\Fixtures\Status;
 use Neos\Schematic\Tests\Discovery\Fixtures\Title;
 use Neos\Schematic\Tests\Discovery\Fixtures\Titles;
@@ -84,6 +85,17 @@ final class ClassShapeTest extends TestCase
 
         self::assertSame(Nature::Shape, $shape->nature);
         self::assertSame([], $shape->parameters);
+    }
+
+    /**
+     * Whether anyone may call the constructor — the one thing that makes analyzing a class on its behalf safe.
+     */
+    public function testWhetherAClassIsPubliclyConstructibleIsRead(): void
+    {
+        self::assertTrue(ClassShape::of(Post::class)->publiclyConstructible);
+        self::assertTrue(ClassShape::of(NoConstructor::class)->publiclyConstructible);
+        self::assertTrue(ClassShape::of(Status::class)->publiclyConstructible);
+        self::assertFalse(ClassShape::of(Sealed::class)->publiclyConstructible);
     }
 
     public function testAParameterIsFoundByName(): void

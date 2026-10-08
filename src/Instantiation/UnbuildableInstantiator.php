@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Neos\Schematic\Instantiation;
 
-use Neos\JsonSchema\ProvidesSchema;
-
 /**
  * The end of the chain: what no link claimed.
  *
@@ -18,7 +16,7 @@ use Neos\JsonSchema\ProvidesSchema;
 final readonly class UnbuildableInstantiator implements Instantiator
 {
     /**
-     * @template T of ProvidesSchema
+     * @template T of object
      * @param class-string<T> $className
      * @return T
      */

@@ -7,7 +7,8 @@ Build validated PHP value objects out of JSON payloads, and serialize them back 
 by [JSON Schema](https://json-schema.org/) inside the types.
 
 Schematic is **a bridge between PHP classes and JSON Schema**. A type owns its schema by implementing
-`Neos\JsonSchema\ProvidesSchema` (returning it from a static `schema()`).
+`Neos\JsonSchema\ProvidesSchema` (returning it from a static `schema()`). A plain record with a public constructor
+does not have to: its schema is derived from that constructor.
 
 <!-- TOC -->
 * [Schematic](#schematic)
@@ -15,6 +16,7 @@ Schematic is **a bridge between PHP classes and JSON Schema**. A type owns its s
   * [Quick start](#quick-start)
   * [AutoDiscoveringSchema](#autodiscoveringschema)
   * [Instantiation of objects](#instantiation-of-objects)
+    * [Classes without a schema](#classes-without-a-schema)
     * [why we recommend private constructors](#why-we-recommend-private-constructors)
     * [Recommended: Classes validating themselves via static `fromXY` methods](#recommended-classes-validating-themselves-via-static-fromxy-methods)
     * [Custom instantiation with Instantiator Chains](#custom-instantiation-with-instantiator-chains)
@@ -33,7 +35,8 @@ composer require neos/schematic
 
 ## Quick start
 
-A value object owns its schema and hands over its own construction path; a shape derives one from its constructor:
+A value object owns its schema and keeps its constructor private; a plain record has its schema derived from its
+constructor:
 
 ```php
 use Neos\JsonSchema\ProvidesSchema;
@@ -64,22 +67,18 @@ final readonly class Slug implements ProvidesSchema
     }
 }
 
-final readonly class Post implements ProvidesSchema
+// no ProvidesSchema needed: the constructor is public, so the schema is derived from it (recursively) by
+// AutoDiscoveringSchema – Slug contributes its own
+final readonly class Post
 {
-    // both private and public constructors are supported here.
     public function __construct(
         public Slug $slug,
         public string $author,
         public string $text,
     ) {}
-
-    public static function schema(): Schema
-    {
-        static $schema = null;
-        // AutoDiscoveringSchema builds up the schema by reading out class properties (recursively).
-        return $schema ??= AutoDiscoveringSchema::analyze(self::class);
-    }
 }
+
+assert(Schematic::schemaOf(Post::class) == AutoDiscoveringSchema::analyze(Post::class));
 
 $result = Schematic::instantiate(Post::class, ['slug' => 'hello-world', 'author' => 'Ada', 'text' => 'Hi']);
 
@@ -93,7 +92,7 @@ assert(json_encode(Schematic::serialize($result->value()))
 ```
 
 The `static $schema` is used for in-memory caching. A schema is class-level and immutable, so building it once is a good
-idea. This way, this package contains no caching or any other state at all.
+idea. The only state this package keeps is the schemas it derives for classes without one — once per class and process.
 
 **Input is JSON decoded to associative arrays** — `json_decode($json, true)`. A `\stdClass` is reported as the wrong
 type rather than unwrapped, so a payload that validates is a payload that builds.
@@ -113,6 +112,8 @@ follows from its parameters, and that same reading drives building and serializi
 Extras:
 
 - A nested type implementing `ProvidesSchema` contributes *its own* `schema()`
+- A nested type without one is analyzed in turn — unless its constructor is not public, see
+  [Classes without a schema](#classes-without-a-schema)
 - `?T` adds a null branch
 - `A|B` (Union Types): becomes an `anyOf` over them.
 
@@ -166,6 +167,21 @@ assert($result->issues->codes() === ['invalid_pattern', 'required']);
 A caller with no use for a failed outcome reads that same result with `->valueOrThrow()`, and gets a `InstantiationFailed`
 carrying those issues.
 
+### Classes without a schema
+
+`Schematic::schemaOf()` is where the schema of a class comes from — for validating, building and serializing alike:
+
+* a class implementing `ProvidesSchema`: its own `schema()`;
+* otherwise, if anyone may call its constructor — it is public, there is none, or the class is an enum: the schema
+  `AutoDiscoveringSchema::analyze()` derives, computed once per class and process;
+* otherwise, a class with a **private constructor and no schema is refused** with a `LogicException`. A private
+  constructor guards a way in of its own (a `fromString()` checking a pattern, say) that analysis cannot see, and the
+  engine calling that constructor would bypass it. Such a class implements `ProvidesSchema` — even if only to return
+  `AutoDiscoveringSchema::analyze(self::class)`, which is how it says "my constructor is all there is".
+
+A class that cannot be described at all — an `array` parameter, a recursive type — throws while its schema is derived.
+That is a programming error, not bad input, so it is not reported as an issue of the payload.
+
 One consequence of validating once: a **hand-written** `schema()` describing a member more loosely than the member's own
 schema does (an `additionalProperties: true` object where a `Slug` really goes) leaves that member unchecked against
 `Slug::schema()`, with its constructor as the last word. `AutoDiscoveringSchema` cannot produce such a schema.
@@ -175,7 +191,9 @@ schema does (an `additionalProperties: true` object where a `Slug` really goes) 
 A public constructor can not enforce the schema. As the invariant has to hold for *every* instance, we **recommend to 
 make the constructor private**.
 
-A class implementing `ProvidesSchema` has its `__construct()` called with the validated primitives.
+Every class has its `__construct()` called with the validated primitives, whatever its visibility. A class with a
+private constructor has to implement `ProvidesSchema` for that, though — see
+[Classes without a schema](#classes-without-a-schema).
 
 ### Recommended: Classes validating themselves via static `fromXY` methods
 
@@ -227,13 +245,16 @@ to the next instantiator.
 interface Instantiator
 {
     /**
-     * @template T of ProvidesSchema
+     * @template T of object
      * @param class-string<T> $className
      * @return T
      */
     public function build(string $className, mixed $value, Instantiator $root): object;
 }
 ```
+
+A link that needs a class's schema asks `Schematic::schemaOf($className)` rather than calling `schema()` itself, so it
+handles classes without one the same way the built-in links do.
 
 `Schematic::instantiate()` wires the built-in Instantiators together:
 
@@ -370,8 +391,8 @@ a good way.
 
 ## Serialization of objects
 
-`Schematic::serialize()` takes a value whose class owns a schema — the same thing `instantiate()` takes, which is what
-makes it the exact inverse. The class drives *extraction*: only it knows an enum's backing value, a value object's
+`Schematic::serialize()` takes any value `instantiate()` can build, and reads it under that same schema
+(`Schematic::schemaOf()`), which is what makes it the exact inverse. The class drives *extraction*: only it knows an enum's backing value, a value object's
 single member, a collection's items. But PHP's one `array` type covers two JSON structures, so `[]` alone cannot say
 whether it was an empty map or an empty list. The schema can, and that is the one thing it is asked about a *value*
 out here:
@@ -422,8 +443,9 @@ Extraction reads **public properties only**.
 
 ## Types you do not own
 
-A type from another package cannot implement `ProvidesSchema`, and you may not want to wrap it either — the rest of
-your code should keep dealing with the real type.
+A type from another package cannot implement `ProvidesSchema`. If its constructor is public, that does not matter: it
+is analyzed like any plain record. If it is not, it is refused (see [Classes without a schema](#classes-without-a-schema)),
+and you may not want to wrap it either — the rest of your code should keep dealing with the real type.
 
 You can have that, because the engine reads **the constructor**, not the property list:
 
@@ -574,7 +596,10 @@ And three things to keep in mind:
 - **Constructor parameters must be named types, or a union of them.** Intersections are rejected. `mixed` and a bare
   `null` are not supported either — they report as nullable to reflection but describe no shape.
 - **Recursive types are rejected**, with a `CircularReferenceException` naming the cycle. A schema embeds its children
-  directly, so it cannot represent one.
+  directly, so it cannot represent one — a recursive record needs a hand-written `schema()` describing the recursive
+  member loosely.
+- **A class with a private constructor and no schema is refused**, as its own way in is nothing analysis can see. It
+  implements `ProvidesSchema`.
 - **A union-typed constructor parameter is built by trying its branches.** They are tried in the order they are
   declared — the order the published `anyOf` lists them — and the first branch whose schema accepts the value is the
   one it gets built as. Overlapping branches therefore resolve to the first, not the best, match.

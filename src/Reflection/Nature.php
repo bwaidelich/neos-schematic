@@ -22,7 +22,7 @@ use Neos\JsonSchema\StringSchema;
  *
  * - {@see self::fromSchema()} — from the **schema**, which is authoritative because it is the published contract. It is
  *   also the only one that can answer for a one-member envelope whose member is a scalar: `Success{bool $success}`
- *   is written exactly like `Slug{string $value}` and means the opposite. Asked of the schema a class owns, this
+ *   is written exactly like `Slug{string $value}` and means the opposite. Asked of the schema a class has, this
  *   is the whole of what building consults.
  * - {@see ClassShape} — from the **class**, where there is no schema to consult:
  *   {@see \Neos\Schematic\Discovery\AutoDiscoveringSchema} derives one *from* a class, and
@@ -48,7 +48,8 @@ enum Nature
      * What the schema says, or `null` where it makes no structural claim at all — which is what
      * {@see \Neos\Schematic\Instantiation\UnbuildableInstantiator} refuses.
      *
-     * **Building asks this and nothing else**, of the schema the class itself owns: `Nature::fromSchema($className::schema())`.
+     * **Building asks this and nothing else**, of the class's schema: `Nature::fromSchema(Schematic::schemaOf($className))`
+     * — its own, or the one derived on its behalf.
      * There is no fallback to the class there — a class whose published contract claims nothing has told the
      * engine nothing, and a link that knows what it is builds it instead. Nor does this ever answer
      * {@see self::Enum}: an enum publishes the schema of its *cases*, so it reads `Scalar`, and

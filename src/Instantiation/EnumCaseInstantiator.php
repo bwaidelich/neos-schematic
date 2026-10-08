@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Neos\Schematic\Instantiation;
 
-use Neos\JsonSchema\ProvidesSchema;
-
 /**
  * Enum cases are singletons, so they are looked up rather than built: a *backed* enum by its backing value, a
  * *pure* one by its case name — mirroring what the schema published for it.
@@ -17,7 +15,7 @@ final readonly class EnumCaseInstantiator implements Instantiator
     public function __construct(private Instantiator $next) {}
 
     /**
-     * @template T of ProvidesSchema
+     * @template T of object
      * @param class-string<T> $className
      * @return T
      */

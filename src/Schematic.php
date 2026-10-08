@@ -6,6 +6,9 @@ namespace Neos\Schematic;
 
 use Neos\JsonSchema\ProvidesSchema;
 use Neos\JsonSchema\Schema;
+use Neos\Schematic\Discovery\AutoDiscoveringSchema;
+use Neos\Schematic\Discovery\CircularReferenceException;
+use Neos\Schematic\Discovery\UnsupportedTypeException;
 use Neos\Schematic\Exception\UnextractableValue;
 use Neos\Schematic\Instantiation\EnumCaseInstantiator;
 use Neos\Schematic\Instantiation\Instantiator;
@@ -13,12 +16,14 @@ use Neos\Schematic\Instantiation\ListOfItemsInstantiator;
 use Neos\Schematic\Instantiation\NamedShapeInstantiator;
 use Neos\Schematic\Instantiation\ScalarValueInstantiator;
 use Neos\Schematic\Instantiation\UnbuildableInstantiator;
+use Neos\Schematic\Reflection\ClassShape;
 use Neos\Schematic\Serialization\Serializer;
 
 /**
  * The bridge between PHP classes and JSON Schema — and nothing else. A type owns its schema by returning it from a
- * static `schema()`, and a type that does not is refused rather than guessed at; there is no registry, no
- * container and no state of its own to wire up, so every entry point here is static:
+ * static `schema()`; a plain record that does not is described by {@see AutoDiscoveringSchema} instead — see
+ * {@see self::schemaOf()} for when. There is no registry, no container and nothing to wire up, so every entry point
+ * here is static:
  *
  *     final readonly class Slug implements ProvidesSchema
  *     {
@@ -49,15 +54,54 @@ use Neos\Schematic\Serialization\Serializer;
  * **Construction is the constructor, always.** Whatever a class calls its own way in, the engine builds it by
  * calling `__construct()` with the validated primitives — see {@see Instantiator}. There is no closure to hand
  * over, no naming convention to satisfy, and no second entry point for a class that keeps its constructor
- * private: opting in is implementing {@see ProvidesSchema}, which is a decision the class makes once, in its own
- * body, and which the engine can actually check.
+ * private: a class with a private constructor opts in by implementing {@see ProvidesSchema}, which is a decision
+ * it makes once, in its own body, and which the engine can actually check. A class whose constructor is public
+ * needs no such decision — anyone may call it already, and the engine calling it bypasses nothing.
  */
 final class Schematic
 {
+    /**
+     * Schemas derived on a class's behalf, by class name. A class owning its schema is asked every time — memoizing
+     * that one is its own business.
+     *
+     * @var array<class-string, Schema>
+     */
+    private static array $derived = [];
+
     private function __construct() {}
 
     /**
-     * Builds an instance, validating the input against the class's own schema first.
+     * The schema a class is validated against, built by and serialized under:
+     *
+     * - its own `schema()` if it implements {@see ProvidesSchema},
+     * - otherwise, if anyone may call its constructor (it is public, absent, or the class is an enum), the schema
+     *   {@see AutoDiscoveringSchema} derives from it — once per class and process, since that depends on nothing
+     *   but the class,
+     * - otherwise nothing: a private constructor guards a way in of its own that analysis cannot see.
+     *
+     * A custom {@see Instantiator} link asks this, too, rather than calling `schema()` itself.
+     *
+     * @param class-string $className
+     * @throws \LogicException if the class provides no schema and its constructor is not public
+     * @throws UnsupportedTypeException|CircularReferenceException if the class cannot be described — a
+     *     programming error, never a reaction to input
+     */
+    public static function schemaOf(string $className): Schema
+    {
+        if (is_a($className, ProvidesSchema::class, true)) {
+            return $className::schema();
+        }
+        if (isset(self::$derived[$className])) {
+            return self::$derived[$className];
+        }
+        if (!ClassShape::of($className)->publiclyConstructible) {
+            throw new \LogicException(AutoDiscoveringSchema::notDescribable($className), 1783600413);
+        }
+        return self::$derived[$className] = AutoDiscoveringSchema::analyze($className);
+    }
+
+    /**
+     * Builds an instance, validating the input against the class's schema first — see {@see self::schemaOf()}.
      *
      * Returns a result rather than throwing: every issue in the payload at once, with its paths, which is what a
      * caller handling input from outside wants. A named constructor, which has no half-built value object to hand
@@ -65,14 +109,14 @@ final class Schematic
      *
      * Safe to call from the class's own named constructor.
      *
-     * @template T of ProvidesSchema
+     * @template T of object
      * @param class-string<T> $className
      * @return InstantiationResult<T>
      */
     #[\NoDiscard('inspect the InstantiationResult; discarding it drops the instantiation outcome')]
     public static function instantiate(string $className, mixed $input): InstantiationResult
     {
-        $result = $className::schema()->validate($input);
+        $result = self::schemaOf($className)->validate($input);
         if (!$result->valid) {
             return InstantiationResult::failed($className, $result->issues);
         }
@@ -92,13 +136,14 @@ final class Schematic
     }
 
     /**
-     * The way back out: an instance read into the primitives *its own* schema describes, ready for `json_encode()`.
+     * The way back out: an instance read into the primitives its schema describes ({@see self::schemaOf()}), ready
+     * for `json_encode()`.
      *
      * @throws UnextractableValue if the instance does not expose the state its constructor names
      */
     #[\NoDiscard('inspect the returned primitives; discarding them means the serialization was pointless')]
-    public static function serialize(ProvidesSchema $value): mixed
+    public static function serialize(object $value): mixed
     {
-        return Serializer::serialize($value, $value::schema());
+        return Serializer::serialize($value, self::schemaOf($value::class));
     }
 }
