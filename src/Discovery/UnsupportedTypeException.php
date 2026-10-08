@@ -8,8 +8,8 @@ use Neos\JsonSchema\ProvidesSchema;
 
 /**
  * Thrown when a class describes no schema that can be derived from it — an enum with no cases, a genuine union or
- * intersection type, `mixed`, a builtin that is not one of the four JSON scalars, or a class that provides no schema
- * and keeps its constructor private.
+ * intersection type, `mixed`, a builtin that is not one of the four JSON scalars, or a class with neither a schema
+ * nor a public constructor.
  *
  * It is always a *generation*-time failure, i.e. a programming error, never a reaction to input.
  */
@@ -21,9 +21,6 @@ final class UnsupportedTypeException extends \RuntimeException
     }
 
     /**
-     * A class owning no schema whose constructor is not public: describing it from that constructor would bypass
-     * whatever its own way in enforces.
-     *
      * @param class-string $className
      */
     public static function notDescribable(string $className): self

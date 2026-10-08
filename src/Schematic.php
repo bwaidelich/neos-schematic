@@ -82,9 +82,8 @@ final class Schematic
      * A custom {@see Instantiator} link asks this, too, rather than calling `schema()` itself.
      *
      * @param class-string $className
-     * @throws UnsupportedTypeException|CircularReferenceException if the class cannot be described — including a
-     *     class that provides no schema and whose constructor is not public; a programming error, never a reaction
-     *     to input
+     * @throws UnsupportedTypeException|CircularReferenceException if the class cannot be described — a
+     *     programming error, never a reaction to input
      */
     public static function schemaOf(string $className): Schema
     {
